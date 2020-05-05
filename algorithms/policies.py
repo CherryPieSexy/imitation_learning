@@ -6,7 +6,8 @@ import torch.distributions as dist
 # Policy is used to sample actions, compute log-probs and entropy
 # can be separated from agent.
 # TODO: Normal, NormalFixedSigma, GumbelCategorical (state-trough with reparametrization
-# TODO: it is unclear what should I do with entropy of tanh(Normal)
+# TODO: it is unclear what should I do with entropy of tanh(Normal).
+#  Practical solution - force action to be close to 0
 
 
 class Categorical:
@@ -110,5 +111,16 @@ class NormalFixedSigma:
         log_prob = distribution.log_prob(action)
         return log_prob.sum(-1)
 
-    def entropy(self, parameters):
-        return torch.tensor(self.sigma)
+    @staticmethod
+    def entropy(parameters):
+        # increase entropy == make action closer to 0
+        mean = parameters
+        entropy = -(mean ** 2).sum(-1)
+        return entropy
+
+
+distributions_dict = {
+    'Categorical': Categorical,
+    'Beta': Beta,
+    'NormalFixed': NormalFixedSigma
+}

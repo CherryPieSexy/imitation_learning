@@ -3,7 +3,7 @@ import torch
 from time import sleep
 from tqdm import tqdm
 
-from simple.dqn import DQN
+from algorithms.dqn import DQN
 
 
 agent = DQN(

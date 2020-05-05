@@ -3,13 +3,13 @@ import torch
 from time import sleep
 from tqdm import tqdm
 
-from simple.a2c import A2C
+from algorithms.a2c import A2C
 
 
 agent = A2C(
     4, 2, 64, 'cpu',
-    'Categorical',
-    1e-3, 0.99, 1e-3
+    'Categorical', False, '1-step',
+    1e-3, 0.99, 1e-3, 100500
 )
 
 
