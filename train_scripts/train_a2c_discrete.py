@@ -8,7 +8,7 @@ from algorithms.a2c import A2C
 
 agent = A2C(
     4, 2, 64, 'cpu',
-    'Categorical', False, '1-step',
+    'Categorical', True, 'gae',
     1e-3, 0.99, 1e-3, 100500
 )
 
@@ -35,6 +35,10 @@ class EnvPool:
                 observation[i] = self.environments[i].reset()
 
         return observation, reward, done
+
+    def close(self):
+        for env in self.environments:
+            env.close()
 
 
 env_pool = EnvPool(4)
@@ -86,3 +90,6 @@ def play_episode(render=False):
 for _ in range(10):
     r = play_episode(True)
     print(sum(r))
+
+env_pool.close()
+environment.close()
