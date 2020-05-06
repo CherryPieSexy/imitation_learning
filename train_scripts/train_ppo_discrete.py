@@ -3,13 +3,14 @@ import torch
 from time import sleep
 from tqdm import tqdm
 
-from algorithms.a2c import A2C
+from algorithms.ppo import PPO
 
 
-agent = A2C(
+agent = PPO(
     4, 2, 64, 'cpu',
-    'Categorical', True, '1-step',
-    1e-3, 0.99, 1e-3, 100500
+    'Categorical', True, 'gae',
+    1e-3, 0.99, 1e-3, 100500,
+    ppo_epsilon=0.1, ppo_n_epochs=3, ppo_mini_batch=15
 )
 
 

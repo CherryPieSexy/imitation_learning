@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-from .a2c import Categorical
+from algorithms.policies import Categorical
 
 
 class NN(nn.Module):
