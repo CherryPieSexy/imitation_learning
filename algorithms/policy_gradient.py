@@ -4,7 +4,7 @@ import torch
 from torch.nn.utils import clip_grad_norm_
 
 from .policies import distributions_dict
-from .nn import ActorCriticNN
+from .nn import ActorCriticMLP
 
 
 class PolicyGradient:
@@ -32,7 +32,7 @@ class PolicyGradient:
         # policy, value = nn(obs)
         # policy.size() == (T, B, dim(A))
         # value.size() == (T, B)  - there is no '1' at the last dimension!
-        self.nn = ActorCriticNN(observation_size, action_size, hidden_size)
+        self.nn = ActorCriticMLP(observation_size, action_size, hidden_size)
         self.nn.to(device)
         self.opt = torch.optim.Adam(self.nn.parameters(), lr)
 
@@ -42,6 +42,34 @@ class PolicyGradient:
         self.gamma = gamma
         self.entropy = entropy
         self.clip_grad = clip_grad
+
+    def save_policy(self, filename):
+        """
+        Saves only nn weights (aka policy) into a file
+        :param filename: str
+        """
+        state_dict = {
+            'nn': self.nn.state_dict()
+        }
+        torch.save(state_dict, filename)
+
+    def save(self, filename):
+        """
+        Saves nn and optimizer into a file
+        :param filename: str
+        """
+        state_dict = {
+            'nn': self.nn.state_dict(),
+            'opt': self.opt.state_dict()
+        }
+        torch.save(state_dict, filename)
+
+    def _get_state_dict(self):
+        state_dict = {
+            'nn': self.nn.state_dict(),
+            'opt': self.opt.state_dict()
+        }
+        return state_dict
 
     def act(self, observations):
         """
@@ -130,3 +158,6 @@ class PolicyGradient:
         rollout_t = (observations, actions, rewards, not_done)
 
         return rollout_t, policy, values, returns, advantages
+
+    def loss_on_rollout(self, *args, **kwargs):
+        raise NotImplementedError

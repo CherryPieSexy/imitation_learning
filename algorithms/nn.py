@@ -1,7 +1,8 @@
 import torch.nn as nn
 
 
-class ActorCriticNN(nn.Module):
+# In future we will use CNN and RNN, this should be indicated by class name
+class ActorCriticMLP(nn.Module):
     # just 3-layer MLP with relu activation and policy & value heads
     def __init__(self, observation_size, action_size, hidden_size):
         super().__init__()
@@ -15,6 +16,17 @@ class ActorCriticNN(nn.Module):
     def forward(self, observation):
         f = self.fe(observation)
         return self.policy(f), self.value(f).squeeze(-1)
+
+
+class ActorCriticCNN(nn.Module):
+    # TODO: implement
+    def __init__(self):
+        super().__init__()
+        # TODO: start with the simplest possible architecture
+        pass
+
+    def forward(self, observation):
+        pass
 
 
 class QNetwork(nn.Module):

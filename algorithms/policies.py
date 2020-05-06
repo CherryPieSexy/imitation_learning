@@ -7,7 +7,7 @@ import torch.distributions as dist
 # can be separated from agent.
 # TODO: Normal, NormalFixedSigma, GumbelCategorical (state-trough with reparametrization
 # TODO: it is unclear what should I do with entropy of tanh(Normal).
-#  Practical solution - force action to be close to 0
+#  Practical solution - force action to be close to 0, so set entropy to -action.pow(2).mean()
 
 
 class Categorical:
