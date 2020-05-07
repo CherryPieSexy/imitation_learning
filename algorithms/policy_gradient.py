@@ -3,8 +3,8 @@
 import torch
 from torch.nn.utils import clip_grad_norm_
 
-from .policies import distributions_dict
-from .nn import ActorCriticMLP
+from algorithms.policies import distributions_dict
+from algorithms.nn import ActorCriticMLP
 
 
 class PolicyGradient:
@@ -71,15 +71,16 @@ class PolicyGradient:
         }
         return state_dict
 
-    def act(self, observations):
+    def act(self, observations, deterministic=False):
         """
         :param observations: np.array of observation, shape = [T, B, dim(obs)]
+        :param deterministic: True or False
         :return: action, np.array of shape = [T, B, dim(action)]
         """
         logits, _ = self.nn(
             torch.tensor(observations, dtype=torch.float32)
         )
-        action = self.distribution.sample(logits, False)
+        action = self.distribution.sample(logits, deterministic)
         return action.cpu().numpy()
 
     def _one_step_returns(self, next_values, rewards, not_done):
@@ -159,5 +160,5 @@ class PolicyGradient:
 
         return rollout_t, policy, values, returns, advantages
 
-    def loss_on_rollout(self, *args, **kwargs):
+    def train_on_rollout(self, *args, **kwargs):
         raise NotImplementedError

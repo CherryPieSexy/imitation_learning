@@ -34,7 +34,7 @@ class A2C(PolicyGradient):
         }
         return result
 
-    def loss_on_rollout(self, rollout):
+    def train_on_rollout(self, rollout):
         """
         :param rollout: tuple (observations, actions, rewards, is_done),
                where each one is np.array of shape [time, batch, ...] except observations,
