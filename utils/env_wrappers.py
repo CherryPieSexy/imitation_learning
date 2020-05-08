@@ -16,26 +16,13 @@ class ContinuousActionWrapper(gym.Wrapper):
         return self.env.step(env_action)
 
 
-if __name__ == '__main__':
-    from utils.vec_env import SubprocVecEnv
+class OneHotWrapper(gym.Wrapper):
+    # transforms one-hot encoded actions to id
+    def __init__(self, env):
+        super().__init__(env)
 
-    def init_env(env_name_, env_id_):
-        def _init_env():
-            env_ = gym.make(env_name_)
-            return env_
-        return _init_env
-
-
-    # single env:
-    env_name = 'CartPole-v1'
-    env = gym.make(env_name)
-    obs = env.reset()
-
-    # vec env:
-    venv = SubprocVecEnv([init_env(env_name, i) for i in range(5)])
-    print(venv.reset())
-    done = False
-    while not done:
-        _, _, done, _ = venv.step([0] * 5)
-        done = any(done)
-    venv.close()
+    def step(self, action):
+        # noinspection PyUnresolvedReferences
+        index = action.argmax()
+        step_result = self.env.step(index)
+        return step_result

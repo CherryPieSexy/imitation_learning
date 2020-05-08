@@ -1,5 +1,6 @@
 import math
 import torch
+import torch.nn.functional as fun
 import torch.distributions as dist
 
 
@@ -36,6 +37,23 @@ class Categorical:
         return entropy
 
 
+class GumbelSoftmax(Categorical):
+    # same as categorical, but actions are one-hot and differentiable
+    def __init__(self):
+        super().__init__()
+        self.dist_fn = dist.OneHotCategorical
+
+    def sample(self, parameters, deterministic):
+        logits = parameters
+        if deterministic:
+            index = logits.argmax(-1, keepdim=True)
+            action = torch.zeros_like(logits)
+            action.scatter_(-1, index, 1.0)
+        else:
+            action = fun.gumbel_softmax(logits, hard=True)
+        return action
+
+
 class Beta:
     # we want samples to be in [-1, +1], but supp(Beta) = [0, 1]
     # rescale actions with y = 2 * x - 1, x ~ Beta
@@ -60,7 +78,9 @@ class Beta:
     def sample(self, parameters, deterministic):
         alpha, beta = self._convert_parameters(parameters)
         if deterministic:
-            z = alpha / (alpha + beta)
+            # z = alpha / (alpha + beta)
+            # more practical solution - return mode instead of mean
+            z = (alpha - 1.0) / (alpha + beta - 2.0)
         else:
             distribution = self.dist_fn(alpha, beta)
             z = distribution.sample()
@@ -119,8 +139,56 @@ class NormalFixedSigma:
         return entropy
 
 
+class TanhNormal:
+    MIN_LOG_SIGMA = -20.0
+    MAX_LOG_SIGMA = 2.0
+
+    def __init__(self):
+        self.dist_fn = dist.Normal
+
+    def _convert_parameters(self, parameters):
+        mean, log_sigma = parameters
+        log_sigma = torch.clamp(log_sigma, self.MIN_LOG_SIGMA, self.MAX_LOG_SIGMA)
+        return mean, log_sigma
+
+    def sample(self, parameters, deterministic):
+        mean, log_sigma = parameters
+        if deterministic:
+            z = mean
+        else:
+            distribution = self.dist_fn(mean, log_sigma.exp())
+            z = distribution.sample()
+        action = torch.tanh(z)
+        return action
+
+    @staticmethod
+    def _atanh(x):
+        x = torch.clamp(x, -0.999, +0.999)
+        # noinspection PyTypeChecker
+        z = 0.5 * torch.log((1.0 + x) / (1.0 - x))
+        return z
+
+    def log_prob(self, parameters, action):
+        # log prob changes because of tanh
+        # log_pi(a) - log(d(tanh(z)) / dz)
+        mean, log_sigma = self._convert_parameters(parameters)
+        distribution = self.dist_fn(mean, log_sigma.exp())
+        z = self._atanh(action)
+        log_prob_z = distribution.log_prob(z)
+        log_prob = log_prob_z - math.log(4.0) + 2.0 * torch.log(z.exp() + (-z).exp())
+        return log_prob.sum(-1)
+
+    def entropy(self, parameters):
+        # increase entropy = decrease mean + increase variance
+        mean, log_sigma = self._convert_parameters(parameters)
+        entropy = -(mean ** 2).sum(-1) + 0.01 * log_sigma
+        return entropy.sum(-1)
+
+
 distributions_dict = {
     'Categorical': Categorical,
+    'GumbelSoftmax': GumbelSoftmax,
     'Beta': Beta,
-    'NormalFixed': NormalFixedSigma
+    'NormalFixed': NormalFixedSigma,
+    'TanhNormal': TanhNormal,
 }

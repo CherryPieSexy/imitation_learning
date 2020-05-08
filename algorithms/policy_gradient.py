@@ -26,7 +26,7 @@ class PolicyGradient:
         self.device = device
 
         self.distribution = distributions_dict[distribution]()
-        if distribution in ['Beta', 'Normal']:
+        if distribution in ['Beta', 'TanhNormal']:
             action_size *= 2
 
         # policy, value = nn(obs)
@@ -81,11 +81,12 @@ class PolicyGradient:
         :param deterministic: True or False
         :return: action, np.array of shape = [T, B, dim(action)]
         """
-        logits, _ = self.nn(
+        policy, _ = self.nn(
             torch.tensor(observations, dtype=torch.float32)
         )
-        action = self.distribution.sample(logits, deterministic)
-        return action.cpu().numpy()
+        action = self.distribution.sample(policy, deterministic)
+        # we can not use 'action.cpu().numpy()' here, because we want action to have gradient
+        return action
 
     def _one_step_returns(self, next_values, rewards, not_done):
         returns = rewards + self.gamma * not_done * next_values

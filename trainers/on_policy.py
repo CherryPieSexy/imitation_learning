@@ -1,4 +1,6 @@
+import os
 import numpy as np
+import torch
 from tqdm import trange
 from tensorboardX import SummaryWriter
 
@@ -24,13 +26,25 @@ class OnPolicyTrainer:
         self._env_episode = np.zeros(len(train_env), dtype=np.int32)
 
         self._log_dir = log_dir
+
+        try:
+            os.mkdir(self._log_dir)
+            os.mkdir(self._log_dir + 'tb')
+            os.mkdir(self._log_dir + 'checkpoints')
+        except FileExistsError:
+            print('log_dir already exists')
+
         # tensorboard logs saved in 'log_dir/tb/', checkpoints in 'log_dir/checkpoints'
         self._writer = SummaryWriter(log_dir + 'tb/')  # instantiate this
 
     def _gather_rollout(self, observation, rollout_len):
         observations, actions, rewards, is_done = [observation], [], [], []
         for _ in range(rollout_len):
-            action = self._agent.act(observation)
+            # on-policy trainer does not requires actions to be differentiable
+            # however, agent may be used by different algorithms which may require that
+            with torch.no_grad():
+                action = self._agent.act(observation)
+            action = action.cpu().numpy()
             observation, reward, done, _ = self._train_env.step(action)
 
             observations.append(observation)
@@ -75,7 +89,9 @@ class OnPolicyTrainer:
         episode_rewards = []
 
         while len(episode_rewards) < n_tests:
-            action = self._agent.act(observation, deterministic=True)
+            with torch.no_grad():
+                action = self._agent.act(observation, deterministic=True)
+            action = action.cpu().numpy()
             observation, reward, done, _ = self._test_env.step(action)
             env_reward += reward
             if np.any(done):
@@ -103,10 +119,12 @@ class OnPolicyTrainer:
         self._test_agent(0, n_tests)
 
         for epoch in range(n_epoch):
-            # TODO: change trange to pbar
-            for train_step in trange(n_steps):
+            p_bar = trange(n_steps, ncols=90, desc=f'epoch_{epoch}')
+            for train_step in p_bar:
                 observation = self._train_step(
                     observation, rollout_len, train_step + epoch * n_steps
                 )
+            # TODO: for some reason tensorboard does not contain test reward after last epoch.
+            #  Need to figure out why and fix
             self._test_agent(epoch + 1, n_tests)
             self._agent.save(self._log_dir + 'checkpoints/' + f'epoch_{epoch}.pth')
