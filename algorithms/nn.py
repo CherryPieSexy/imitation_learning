@@ -1,17 +1,39 @@
 import torch.nn as nn
 
 
+# orthogonal init from ikostrikov
+def init(
+        module,
+        weight_init=nn.init.orthogonal_,
+        bias_init=nn.init.constant_,
+        gain=1.0
+):
+    weight_init(module.weight.data, gain=gain)
+    bias_init(module.bias.data, 0)
+    return module
+
+
 # In future we will use CNN and RNN, this should be indicated by class name
 class ActorCriticMLP(nn.Module):
     # just 3-layer MLP with relu activation and policy & value heads
-    def __init__(self, observation_size, action_size, hidden_size):
+
+    def __init__(
+            self,
+            observation_size, action_size, hidden_size,
+            categorical=False
+    ):
         super().__init__()
+
+        gain = nn.init.calculate_gain('relu')
         self.fe = nn.Sequential(
-            nn.Linear(observation_size, hidden_size), nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size), nn.ReLU()
+            init(nn.Linear(observation_size, hidden_size), gain=gain), nn.ReLU(),
+            init(nn.Linear(hidden_size, hidden_size), gain=gain), nn.ReLU()
         )
-        self.policy = nn.Linear(hidden_size, action_size)
-        self.value = nn.Linear(hidden_size, 1)
+
+        if categorical:
+            gain = 0.01
+        self.policy = init(nn.Linear(hidden_size, action_size), gain=gain)
+        self.value = init(nn.Linear(hidden_size, 1))
 
     def forward(self, observation):
         f = self.fe(observation)

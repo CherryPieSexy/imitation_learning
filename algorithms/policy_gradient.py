@@ -32,7 +32,11 @@ class PolicyGradient:
         # policy, value = nn(obs)
         # policy.size() == (T, B, dim(A))
         # value.size() == (T, B)  - there is no '1' at the last dimension!
-        self.nn = ActorCriticMLP(observation_size, action_size, hidden_size)
+        categorical = distribution == 'Categorical'
+        self.nn = ActorCriticMLP(
+            observation_size, action_size, hidden_size,
+            categorical=categorical
+        )
         self.nn.to(device)
         self.opt = torch.optim.Adam(self.nn.parameters(), lr)
 

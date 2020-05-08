@@ -6,6 +6,7 @@ from algorithms.policy_gradient import PolicyGradient
 
 class PPO(PolicyGradient):
     # Is it possible to write nice, clean and well-readable PPO? I doubt it
+    # this class implement core PPO methods: several train steps + policy and value clipping
     def __init__(self, *args, ppo_epsilon, ppo_n_epochs, ppo_mini_batch):
         super().__init__(*args)
         self.ppo_epsilon = ppo_epsilon
