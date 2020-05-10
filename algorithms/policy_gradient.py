@@ -4,18 +4,64 @@ import torch
 from torch.nn.utils import clip_grad_norm_
 
 from algorithms.policies import distributions_dict
-from algorithms.nn import ActorCriticMLP
+from algorithms.nn import ActorCriticMLP, ActorCriticAtari
+
+
+class PolicyGradientMinimal:
+    # minimal version of the class below. Can only save/load nn and act
+    def __init__(
+            self,
+            image_env,
+            observation_size, action_size, hidden_size, device,
+            distribution
+    ):
+        self.device = device
+        self.distribution = distributions_dict[distribution]()
+        if distribution in ['Beta', 'TanhNormal']:
+            action_size *= 2
+        categorical = distribution in ['Categorical', 'GumbelSoftmax']
+
+        if image_env:
+            self.nn = ActorCriticAtari(action_size, categorical)
+        else:
+            self.nn = ActorCriticMLP(
+                observation_size, action_size, hidden_size,
+                categorical
+            )
+
+        self.nn.to(device)
+
+    def save(self, filename):
+        state_dict = {
+            'nn': self.nn.state_dict()
+        }
+        torch.save(state_dict, filename)
+
+    def load(self, filename):
+        checkpoint = torch.load(filename)
+        self.nn.load_state_dict(checkpoint['nn'])
+
+    def act(self, observations, deterministic=False):
+        with torch.no_grad():
+            policy, _ = self.nn(
+                torch.tensor(observations, dtype=torch.float32, device=self.device)
+            )
+            action = self.distribution.sample(policy, deterministic)
+        action = action.cpu().numpy()
+        return action
 
 
 class PolicyGradient:
     def __init__(
             self,
+            image_env,
             observation_size, action_size, hidden_size, device,
             distribution, normalize_adv, returns_estimator,
             lr, gamma, entropy, clip_grad,
             gae_lambda=0.95
     ):
         """
+        :param image_env: True or False
         :param observation_size, action_size, hidden_size, device: just nn parameters
         :param distribution: 'Categorical' or 'NormalFixed' or 'Beta'
         :param normalize_adv: True or False
@@ -32,11 +78,16 @@ class PolicyGradient:
         # policy, value = nn(obs)
         # policy.size() == (T, B, dim(A))
         # value.size() == (T, B)  - there is no '1' at the last dimension!
-        categorical = distribution == 'Categorical'
-        self.nn = ActorCriticMLP(
-            observation_size, action_size, hidden_size,
-            categorical=categorical
-        )
+        categorical = distribution in ['Categorical', 'GumbelSoftmax']
+
+        if image_env:
+            self.nn = ActorCriticAtari(action_size, categorical)
+        else:
+            self.nn = ActorCriticMLP(
+                observation_size, action_size, hidden_size,
+                categorical=categorical
+            )
+
         self.nn.to(device)
         self.opt = torch.optim.Adam(self.nn.parameters(), lr)
 
@@ -68,6 +119,12 @@ class PolicyGradient:
         }
         torch.save(state_dict, filename)
 
+    def load_policy(self):
+        pass
+
+    def load(self):
+        pass
+
     def _get_state_dict(self):
         state_dict = {
             'nn': self.nn.state_dict(),
@@ -82,7 +139,7 @@ class PolicyGradient:
         :return: action, np.array of shape = [T, B, dim(action)]
         """
         policy, _ = self.nn(
-            torch.tensor(observations, dtype=torch.float32)
+            torch.tensor(observations, dtype=torch.float32, device=self.device)
         )
         action = self.distribution.sample(policy, deterministic)
         # we can not use 'action.cpu().numpy()' here, because we want action to have gradient
@@ -130,8 +187,8 @@ class PolicyGradient:
     def _normalize_advantages(advantages):
         # advantages normalized across batch dimension, I think this is correct
         mean = advantages.mean(dim=1, keepdim=True)
-        std = (advantages.std(dim=1, keepdim=True) + 1e-5)
-        advantages = (advantages - mean) / std
+        std = advantages.std(dim=1, keepdim=True)
+        advantages = (advantages - mean) / (std + 1e-8)
         return advantages
 
     def _optimize_loss(self, loss):

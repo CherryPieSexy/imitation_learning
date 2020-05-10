@@ -22,8 +22,8 @@ class OnPolicyTrainer:
         self._train_env = train_env
         self._test_env = test_env
         # store episode reward and number for each train environment
-        self._env_reward = np.zeros(len(train_env), dtype=np.float32)
-        self._env_episode = np.zeros(len(train_env), dtype=np.int32)
+        self._env_reward = np.zeros(train_env.num_envs, dtype=np.float32)
+        self._env_episode = np.zeros(train_env.num_envs, dtype=np.int32)
 
         self._log_dir = log_dir
 
@@ -83,7 +83,7 @@ class OnPolicyTrainer:
         return observation
 
     def _test_agent(self, step, n_tests):
-        n_test_envs = len(self._test_env)
+        n_test_envs = self._test_env.num_envs
         observation = self._test_env.reset()
         env_reward = np.zeros(n_test_envs, dtype=np.float32)
         episode_rewards = []
@@ -100,8 +100,13 @@ class OnPolicyTrainer:
                         episode_rewards.append(env_reward[i])
                         env_reward[i] = 0.0
 
-        mean_reward = np.mean(episode_rewards)
-        self._write_logs('test/', {'reward': mean_reward}, step)
+        reward_mean = np.mean(episode_rewards)
+        reward_std = np.std(episode_rewards)
+        write_dict = {
+            'reward_mean': reward_mean,
+            'reward_std': reward_std
+        }
+        self._write_logs('test/', write_dict, step)
 
     def train(self, n_epoch, n_steps, rollout_len, n_tests):
         """

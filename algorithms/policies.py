@@ -5,10 +5,7 @@ import torch.distributions as dist
 
 
 # Policy is used to sample actions, compute log-probs and entropy
-# can be separated from agent.
-# TODO: Normal, NormalFixedSigma, GumbelCategorical (state-trough with reparametrization
 # TODO: it is unclear what should I do with entropy of tanh(Normal).
-#  Practical solution - force action to be close to 0, so set entropy to -action.pow(2).mean()
 
 
 class Categorical:
@@ -66,6 +63,7 @@ class Beta:
 
     @staticmethod
     def _env_to_agent(action):
+        action = torch.clamp(action, -0.999, +0.999)
         return 0.5 * (action + 1.0)
 
     @staticmethod
@@ -140,19 +138,20 @@ class NormalFixedSigma:
 
 
 class TanhNormal:
-    MIN_LOG_SIGMA = -20.0
-    MAX_LOG_SIGMA = 2.0
+    MIN_LOG_SIGMA = -5.0  # sigma ~ 0.0067
+    MAX_LOG_SIGMA = 0.0  # sigma = 1.0
 
     def __init__(self):
         self.dist_fn = dist.Normal
 
     def _convert_parameters(self, parameters):
-        mean, log_sigma = parameters
+        action_size = parameters.size(-1) // 2
+        mean, log_sigma = parameters.split(action_size, dim=-1)
         log_sigma = torch.clamp(log_sigma, self.MIN_LOG_SIGMA, self.MAX_LOG_SIGMA)
         return mean, log_sigma
 
     def sample(self, parameters, deterministic):
-        mean, log_sigma = parameters
+        mean, log_sigma = self._convert_parameters(parameters)
         if deterministic:
             z = mean
         else:
@@ -181,7 +180,7 @@ class TanhNormal:
     def entropy(self, parameters):
         # increase entropy = decrease mean + increase variance
         mean, log_sigma = self._convert_parameters(parameters)
-        entropy = -(mean ** 2).sum(-1) + 0.01 * log_sigma
+        entropy = log_sigma - torch.log(mean ** 2)
         return entropy.sum(-1)
 
 

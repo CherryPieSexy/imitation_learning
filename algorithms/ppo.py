@@ -7,10 +7,10 @@ from algorithms.policy_gradient import PolicyGradient
 class PPO(PolicyGradient):
     # Is it possible to write nice, clean and well-readable PPO? I doubt it
     # this class implement core PPO methods: several train steps + policy and value clipping
-    def __init__(self, *args, ppo_epsilon, ppo_n_epochs, ppo_mini_batch):
-        super().__init__(*args)
+    def __init__(self, *args, ppo_epsilon, ppo_n_epoch, ppo_mini_batch, **kwargs):
+        super().__init__(*args, **kwargs)
         self.ppo_epsilon = ppo_epsilon
-        self.ppo_n_epochs = ppo_n_epochs
+        self.ppo_n_epoch = ppo_n_epoch
         self.ppo_mini_batch = ppo_mini_batch
 
     def _policy_loss(self, policy_old, policy, actions, advantage):
@@ -107,7 +107,7 @@ class PPO(PolicyGradient):
         # What if in future there will be more values to return?
         ppo_result = np.zeros(5, dtype=np.float32)
 
-        n = self.ppo_n_epochs
+        n = self.ppo_n_epoch
         for ppo_epoch in range(n):
             ppo_step_result = self._ppo_train_step(
                 observations, actions,

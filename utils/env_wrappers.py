@@ -26,3 +26,19 @@ class OneHotWrapper(gym.Wrapper):
         index = action.argmax()
         step_result = self.env.step(index)
         return step_result
+
+
+class FrameSkipWrapper(gym.Wrapper):
+    def __init__(self, env, frame_skip):
+        super().__init__(env)
+        self.frame_skip = frame_skip
+
+    def step(self, action):
+        reward = 0.0
+        for _ in range(self.frame_skip):
+            obs, r, done, info = self.env.step(action)
+            reward += r
+            if done:
+                break
+        # noinspection PyUnboundLocalVariable
+        return obs, reward, done, info

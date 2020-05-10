@@ -16,7 +16,6 @@ def init(
 # In future we will use CNN and RNN, this should be indicated by class name
 class ActorCriticMLP(nn.Module):
     # just 3-layer MLP with relu activation and policy & value heads
-
     def __init__(
             self,
             observation_size, action_size, hidden_size,
@@ -40,15 +39,39 @@ class ActorCriticMLP(nn.Module):
         return self.policy(f), self.value(f).squeeze(-1)
 
 
-class ActorCriticCNN(nn.Module):
-    # TODO: implement
-    def __init__(self):
+class ActorCriticAtari(nn.Module):
+    # 2-layer CNN from DQN paper
+    def __init__(
+            self,
+            action_size,
+            categorical=False
+    ):
         super().__init__()
-        # TODO: start with the simplest possible architecture
-        pass
+
+        gain = nn.init.calculate_gain('relu')
+        # (4, 84, 84) -> (32, 9, 9)
+        self.conv = nn.Sequential(
+            init(nn.Conv2d(4, 16, kernel_size=8, stride=4), gain=gain),
+            nn.ReLU(),
+            init(nn.Conv2d(16, 32, kernel_size=4, stride=2), gain=gain),
+            nn.ReLU()
+        )
+        self.fe = init(nn.Linear(32 * 9 * 9, 256))
+
+        if categorical:
+            gain = 0.01
+        self.policy = init(nn.Linear(256, action_size), gain=gain)
+        self.value = init(nn.Linear(256, 1))
 
     def forward(self, observation):
-        pass
+        # observation is an image of size (T, B, C, H, W)
+        obs_size = observation.size()
+        (time, batch), chw = obs_size[:2], obs_size[2:]
+        observation = observation.view(time * batch, *chw)
+        conv = self.conv(observation)
+        flatten = conv.view(time, batch, -1)
+        f = self.fe(flatten)
+        return self.policy(f), self.value(f).squeeze(-1)
 
 
 class QNetwork(nn.Module):

@@ -5,12 +5,13 @@ from tqdm import tqdm
 from algorithms.a2c import A2C
 
 
-env_name = 'BipedalWalker-v3'
+env_name = 'Pendulum-v0'
 
 agent = A2C(
-    24, 4, 128, 'cpu',
-    'Beta',
-    1e-3, 0.99, 1e-3
+    3, 1, 128, 'cpu',
+    'Beta', True, 'gae',
+    1e-3, 0.99, 1e-3, 100500,
+    0.95
 )
 
 
@@ -27,7 +28,7 @@ class EnvPool:
         return [env.reset() for env in self.environments]
 
     def step(self, actions):
-        results = [env.step(a) for env, a in zip(self.environments, actions)]
+        results = [env.step(2 * a) for env, a in zip(self.environments, actions)]
         observation, reward, done, _ = map(list, zip(*results))
 
         for i in range(len(self.environments)):
@@ -49,7 +50,7 @@ def gather_rollout(obs, rollout_len):
 
         obs_.append(obs)
         acts_.append(act_)
-        rews_.append([0.3 * r_ for r_ in rew])
+        rews_.append([r_ for r_ in rew])
         is_done_.append(don)
     return obs, (obs_, acts_, rews_, is_done_)
 
@@ -61,7 +62,7 @@ def to_tensor(x):
 observations = env_pool.reset()
 for step in tqdm(range(20_000)):
     observations, rollout = gather_rollout(observations, 20)
-    agent.loss_on_rollout(rollout)
+    agent.train_on_rollout(rollout)
 
 
 environment = gym.make(env_name)
@@ -76,7 +77,7 @@ def play_episode(render=False):
     while not done:
         action = agent.act([observation])
         i += 1
-        observation, reward, done, _ = environment.step(action[0])
+        observation, reward, done, _ = environment.step(2 * action[0])
         if render:
             environment.render()
             # sleep(0.01)

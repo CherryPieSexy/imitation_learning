@@ -264,7 +264,6 @@ class SubprocVecEnv(VecEnv):
         self.closed = False
         self.in_series = in_series
         nenvs = len(env_fns)
-        self.nenvs = nenvs
         assert nenvs % in_series == 0, "Number of envs must be divisible by number of envs to run in series"
         self.nremotes = nenvs // in_series
         env_fns = np.array_split(env_fns, self.nremotes)
@@ -283,9 +282,6 @@ class SubprocVecEnv(VecEnv):
         observation_space, action_space, self.spec = self.remotes[0].recv().x
         self.viewer = None
         VecEnv.__init__(self, nenvs, observation_space, action_space)
-
-    def __len__(self):
-        return self.nenvs
 
     def step_async(self, actions):
         self._assert_not_closed()

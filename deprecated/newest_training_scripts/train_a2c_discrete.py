@@ -1,16 +1,16 @@
 import gym
 import torch
+import numpy as np
 from time import sleep
 from tqdm import tqdm
 
-from algorithms.ppo import PPO
+from algorithms.a2c import A2C
 
 
-agent = PPO(
+agent = A2C(
     4, 2, 64, 'cpu',
-    'Categorical', True, 'gae',
-    1e-3, 0.99, 1e-3, 100500,
-    ppo_epsilon=0.1, ppo_n_epochs=3, ppo_mini_batch=15
+    'Categorical', True, '1-step',
+    1e-3, 0.99, 1e-3, 100500
 )
 
 
@@ -66,7 +66,7 @@ def to_tensor(x):
 observations = env_pool.reset()
 for step in tqdm(range(5_000)):
     observations, rollout = gather_rollout(observations, 5)
-    agent.loss_on_rollout(rollout)
+    agent.train_on_rollout(rollout)
 
 
 environment = gym.make('CartPole-v0')
