@@ -1,8 +1,3 @@
-# import sys
-# import os
-
-# sys.path.insert(1, (os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))))
-
 import gym
 import torch
 import argparse
@@ -33,8 +28,8 @@ def parse_env(env_name):
 
 def main(args):
     # init env
-    train_env = init_env(args.env_name, args.train_env_num)
-    test_env = init_env(args.env_name, args.test_env_num)
+    train_env = init_env(args.env_name, args.train_env_num, frame_skip=args.frame_skip)
+    test_env = init_env(args.env_name, args.test_env_num, frame_skip=args.frame_skip)
 
     # init agent
     observation_size, action_size, image_env = parse_env(args.env_name)
@@ -47,11 +42,16 @@ def main(args):
         args.learning_rate, args.gamma, args.entropy, args.clip_grad,
         gae_lambda=args.gae_lambda,
         ppo_epsilon=args.ppo_epsilon, ppo_n_epoch=args.ppo_n_epoch,
-        ppo_mini_batch=args.ppo_mini_batch
+        ppo_mini_batch=args.ppo_mini_batch,
+        use_ppo_value_loss=False
     )
 
     # init and run trainer
-    trainer = OnPolicyTrainer(agent, train_env, test_env, args.log_dir)
+    trainer = OnPolicyTrainer(
+        agent, train_env, test_env,
+        args.normalize_obs, args.normalize_reward,
+        args.log_dir
+    )
     trainer.train(args.n_epoch, args.n_step_per_epoch, args.rollout_len, args.n_tests_per_epoch)
 
     train_env.close()
@@ -64,6 +64,9 @@ def parse_args():
 
     # env
     parser.add_argument("--env_name", type=str)
+    parser.add_argument("--normalize_obs", action='store_true', default=False)
+    parser.add_argument("--normalize_reward", action='store_true', default=False)
+    parser.add_argument("--frame_skip", type=int)
     parser.add_argument("--train_env_num", type=int)
     parser.add_argument("--test_env_num", type=int)
 

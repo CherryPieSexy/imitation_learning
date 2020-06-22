@@ -1,54 +1,11 @@
 # base class for policy gradient algorithms (A2C and PPO)
-
+import numpy as np
 import torch
 from torch.nn.utils import clip_grad_norm_
 
-from algorithms.policies import distributions_dict
-from algorithms.nn import ActorCriticMLP, ActorCriticAtari
-
-
-class PolicyGradientMinimal:
-    # minimal version of the class below. Can only save/load nn and act
-    def __init__(
-            self,
-            image_env,
-            observation_size, action_size, hidden_size, device,
-            distribution
-    ):
-        self.device = device
-        self.distribution = distributions_dict[distribution]()
-        if distribution in ['Beta', 'TanhNormal']:
-            action_size *= 2
-        categorical = distribution in ['Categorical', 'GumbelSoftmax']
-
-        if image_env:
-            self.nn = ActorCriticAtari(action_size, categorical)
-        else:
-            self.nn = ActorCriticMLP(
-                observation_size, action_size, hidden_size,
-                categorical
-            )
-
-        self.nn.to(device)
-
-    def save(self, filename):
-        state_dict = {
-            'nn': self.nn.state_dict()
-        }
-        torch.save(state_dict, filename)
-
-    def load(self, filename):
-        checkpoint = torch.load(filename)
-        self.nn.load_state_dict(checkpoint['nn'])
-
-    def act(self, observations, deterministic=False):
-        with torch.no_grad():
-            policy, _ = self.nn(
-                torch.tensor(observations, dtype=torch.float32, device=self.device)
-            )
-            action = self.distribution.sample(policy, deterministic)
-        action = action.cpu().numpy()
-        return action
+from algorithms.distributions import distributions_dict
+from algorithms.nn import ActorCriticTwoMLP, ActorCriticAtari
+from algorithms.normalization import RunningMeanStd
 
 
 class PolicyGradient:
@@ -61,7 +18,7 @@ class PolicyGradient:
             gae_lambda=0.95
     ):
         """
-        :param image_env: True or False
+        :param image_env:
         :param observation_size, action_size, hidden_size, device: just nn parameters
         :param distribution: 'Categorical' or 'NormalFixed' or 'Beta'
         :param normalize_adv: True or False
@@ -72,24 +29,22 @@ class PolicyGradient:
         self.device = device
 
         self.distribution = distributions_dict[distribution]()
-        if distribution in ['Beta', 'TanhNormal']:
-            action_size *= 2
 
         # policy, value = nn(obs)
-        # policy.size() == (T, B, dim(A))
+        # policy.size() == (T, B, dim(A) or 2 * dim(A))
         # value.size() == (T, B)  - there is no '1' at the last dimension!
-        categorical = distribution in ['Categorical', 'GumbelSoftmax']
 
+        # WARNING: nn MUST be called ONLY inside _call_nn method!
         if image_env:
-            self.nn = ActorCriticAtari(action_size, categorical)
+            self.nn = ActorCriticAtari(action_size)
         else:
-            self.nn = ActorCriticMLP(
-                observation_size, action_size, hidden_size,
-                categorical=categorical
+            self.nn = ActorCriticTwoMLP(
+                observation_size, action_size, hidden_size
             )
 
         self.nn.to(device)
         self.opt = torch.optim.Adam(self.nn.parameters(), lr)
+        self.training = True
 
         self.normalize_adv = normalize_adv
         self.returns_estimator = returns_estimator
@@ -98,39 +53,39 @@ class PolicyGradient:
         self.entropy = entropy
         self.clip_grad = clip_grad
 
-    def save_policy(self, filename):
-        """
-        Saves only nn weights (aka policy) into a file
-        :param filename: str
-        """
-        state_dict = {
-            'nn': self.nn.state_dict()
-        }
-        torch.save(state_dict, filename)
+    def save_jit(self, filename):
+        pass
 
-    def save(self, filename):
+    def save(self, filename, normalizer):
         """
         Saves nn and optimizer into a file
         :param filename: str
+        :param normalizer: RunningMeanStd object or None
         """
         state_dict = {
             'nn': self.nn.state_dict(),
-            'opt': self.opt.state_dict()
+            'opt': self.opt.state_dict(),
         }
+        if normalizer is not None:
+            state_dict['normalizer'] = normalizer.state_dict()
         torch.save(state_dict, filename)
 
-    def load_policy(self):
-        pass
+    def load(self, filename):
+        checkpoint = torch.load(filename)
+        self.nn.load_state_dict(checkpoint['nn'])
+        self.opt.load_state_dict(checkpoint['opt'])
+        if checkpoint.get('normalizer'):
+            normalizer = RunningMeanStd()
+            normalizer.load_state_dict(checkpoint['normalizer'])
+            return normalizer
 
-    def load(self):
-        pass
+    def train(self):
+        self.training = True
+        self.nn.eval()
 
-    def _get_state_dict(self):
-        state_dict = {
-            'nn': self.nn.state_dict(),
-            'opt': self.opt.state_dict()
-        }
-        return state_dict
+    def eval(self):
+        self.training = False
+        self.nn.train()
 
     def act(self, observations, deterministic=False):
         """

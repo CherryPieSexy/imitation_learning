@@ -1,17 +1,27 @@
+from collections import defaultdict
+
 import torch
-import numpy as np
 
 from algorithms.policy_gradient import PolicyGradient
 
 
 class PPO(PolicyGradient):
     # Is it possible to write nice, clean and well-readable PPO? I doubt it
-    # this class implement core PPO methods: several train steps + policy and value clipping
-    def __init__(self, *args, ppo_epsilon, ppo_n_epoch, ppo_mini_batch, **kwargs):
+    # this class implement core PPO methods: several train steps + policy and (optional) value clipping
+    def __init__(
+            self,
+            *args,
+            ppo_epsilon,  # clipping parameter
+            ppo_n_epoch,
+            ppo_mini_batch,
+            use_ppo_value_loss,
+            **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self.ppo_epsilon = ppo_epsilon
         self.ppo_n_epoch = ppo_n_epoch
         self.ppo_mini_batch = ppo_mini_batch
+        self.use_ppo_value_loss = use_ppo_value_loss
 
     def _policy_loss(self, policy_old, policy, actions, advantage):
         # clipped policy objective
@@ -28,10 +38,24 @@ class PPO(PolicyGradient):
         surrogate_2 = prob_ratio_clamp * advantage
         policy_loss = torch.min(surrogate_1, surrogate_2)
 
+        policy_loss = policy_loss.mean()
+        if torch.isnan(policy_loss) or torch.isinf(policy_loss):
+            print('policy_old', policy_old, policy_old.mean())
+            print('policy', policy, policy.mean())
+            print('log_prob_old', log_pi_for_actions_old, log_pi_for_actions_old.mean())
+            print('log_prob', log_pi_for_actions, log_pi_for_actions.mean())
+            # print('actions', actions, actions.mean())
+            # print('advantage', advantage, advantage.mean())
+            print('log_prob_ratio', log_prob_ratio, log_prob_ratio.mean())
+            print('surrogate_1', surrogate_1, surrogate_1.mean())
+            print('surrogate_2', surrogate_2, surrogate_2.mean())
+            print('policy_loss', policy_loss)
+            raise ValueError
+
         return policy_loss.mean()
 
-    def _value_loss(self, values_old, values, returns):
-        # clipped value objective
+    def _clipped_value_loss(self, values_old, values, returns):
+        # clipped value objective, PPO-style
         clipped_value = values_old + torch.clamp(
             (values - values_old), -self.ppo_epsilon, self.ppo_epsilon
         )
@@ -43,6 +67,18 @@ class PPO(PolicyGradient):
 
         return value_loss.mean()
 
+    @staticmethod
+    def _mse_value_loss(values, returns):
+        value_loss = 0.5 * ((values - returns) ** 2)
+        return value_loss.mean()
+
+    def _value_loss(self, values_old, values, returns):
+        if self.use_ppo_value_loss:
+            value_loss = self._clipped_value_loss(values_old, values, returns)
+        else:
+            value_loss = self._mse_value_loss(values, returns)
+        return value_loss
+
     def _calc_losses(
             self,
             policy_old, values_old,
@@ -51,8 +87,20 @@ class PPO(PolicyGradient):
     ):
         value_loss = self._value_loss(values_old, values, returns)
         policy_loss = self._policy_loss(policy_old, policy, actions, advantage)
-        entropy = self.distribution.entropy(policy).mean()
+        entropy = self.distribution.entropy(policy, actions).mean()
         loss = value_loss - policy_loss - self.entropy * entropy
+        if torch.isnan(loss) or torch.isinf(loss):
+            print('policy_old', policy_old, policy_old.mean())
+            print('values_old', values_old, values_old.mean())
+            print('policy', policy, policy.mean())
+            print('values', values, values.mean())
+            print('actions', actions, actions.mean())
+            print('returns', returns, returns.mean())
+            print('advantage', advantage, advantage.mean())
+            print('value_loss', value_loss)
+            print('policy_loss', policy_loss)
+            print('entropy', entropy)
+            raise ValueError
         return value_loss, policy_loss, entropy, loss
 
     def _ppo_train_step(
@@ -84,11 +132,14 @@ class PPO(PolicyGradient):
             actions[row, col], returns[row, col], advantage[row, col]
         )
         grad_norm = self._optimize_loss(loss)
-        result = (
-            value_loss.item(), policy_loss.item(),
-            entropy.item(), loss.item(), grad_norm
-        )
-        return np.array(result)
+        result = {
+            'value_loss': value_loss.item(),
+            'policy_loss': policy_loss.item(),
+            'entropy': entropy.item(),
+            'loss': loss.item(),
+            'grad_norm': grad_norm
+        }
+        return result
 
     def _main(
             self,
@@ -100,12 +151,8 @@ class PPO(PolicyGradient):
         # at the beginning of iteration, i.e. with \theta_old,
         # inside 'loss_on_rollout' method
 
-        # this method pretty similar to A2C but still quite different
-
         policy_old, values_old = policy_old.detach(), values_old.detach()
-        # it is not great to have magic numbers like '5'.
-        # What if in future there will be more values to return?
-        ppo_result = np.zeros(5, dtype=np.float32)
+        ppo_result = defaultdict(float)
 
         n = self.ppo_n_epoch
         for ppo_epoch in range(n):
@@ -114,17 +161,10 @@ class PPO(PolicyGradient):
                 policy_old, values_old,
                 returns, advantage
             )
+            for key, value in ppo_step_result.items():
+                ppo_result[key] += value / n
 
-            ppo_result += ppo_step_result
-
-        result = {
-            'value_loss': ppo_result[0],
-            'policy_loss': ppo_result[1],
-            'entropy': ppo_result[2],
-            'loss': ppo_result[3],
-            'grad_norm': ppo_result[4],
-        }
-        return result
+        return ppo_result
 
     def train_on_rollout(self, rollout):
         """
