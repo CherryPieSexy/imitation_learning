@@ -1,6 +1,9 @@
 import gym
 
 
+gym.logger.set_level(40)
+
+
 class ContinuousActionWrapper(gym.Wrapper):
     # rescales agent actions from [-1, +1] to [low, high]
     def __init__(self, env):
@@ -28,14 +31,14 @@ class OneHotWrapper(gym.Wrapper):
         return step_result
 
 
-class FrameSkipWrapper(gym.Wrapper):
-    def __init__(self, env, frame_skip):
+class ActionRepeatWrapper(gym.Wrapper):
+    def __init__(self, env, action_repeat):
         super().__init__(env)
-        self.frame_skip = frame_skip
+        self.action_repeat = action_repeat
 
     def step(self, action):
         reward = 0.0
-        for _ in range(self.frame_skip):
+        for _ in range(self.action_repeat):
             obs, r, done, info = self.env.step(action)
             reward += r
             if done:

@@ -39,19 +39,6 @@ class PPO(PolicyGradient):
         policy_loss = torch.min(surrogate_1, surrogate_2)
 
         policy_loss = policy_loss.mean()
-        if torch.isnan(policy_loss) or torch.isinf(policy_loss):
-            print('policy_old', policy_old, policy_old.mean())
-            print('policy', policy, policy.mean())
-            print('log_prob_old', log_pi_for_actions_old, log_pi_for_actions_old.mean())
-            print('log_prob', log_pi_for_actions, log_pi_for_actions.mean())
-            # print('actions', actions, actions.mean())
-            # print('advantage', advantage, advantage.mean())
-            print('log_prob_ratio', log_prob_ratio, log_prob_ratio.mean())
-            print('surrogate_1', surrogate_1, surrogate_1.mean())
-            print('surrogate_2', surrogate_2, surrogate_2.mean())
-            print('policy_loss', policy_loss)
-            raise ValueError
-
         return policy_loss.mean()
 
     def _clipped_value_loss(self, values_old, values, returns):
@@ -64,7 +51,6 @@ class PPO(PolicyGradient):
         surrogate_2 = (clipped_value - returns) ** 2
 
         value_loss = 0.5 * torch.max(surrogate_1, surrogate_2)
-
         return value_loss.mean()
 
     @staticmethod
@@ -89,18 +75,6 @@ class PPO(PolicyGradient):
         policy_loss = self._policy_loss(policy_old, policy, actions, advantage)
         entropy = self.distribution.entropy(policy, actions).mean()
         loss = value_loss - policy_loss - self.entropy * entropy
-        if torch.isnan(loss) or torch.isinf(loss):
-            print('policy_old', policy_old, policy_old.mean())
-            print('values_old', values_old, values_old.mean())
-            print('policy', policy, policy.mean())
-            print('values', values, values.mean())
-            print('actions', actions, actions.mean())
-            print('returns', returns, returns.mean())
-            print('advantage', advantage, advantage.mean())
-            print('value_loss', value_loss)
-            print('policy_loss', policy_loss)
-            print('entropy', entropy)
-            raise ValueError
         return value_loss, policy_loss, entropy, loss
 
     def _ppo_train_step(
@@ -184,5 +158,4 @@ class PPO(PolicyGradient):
             returns, advantages
         )
 
-        result['reward'] = rewards.mean().item()
         return result

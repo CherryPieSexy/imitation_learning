@@ -1,4 +1,6 @@
+import os
 import gym
+import json
 import torch
 import argparse
 
@@ -27,9 +29,21 @@ def parse_env(env_name):
 
 
 def main(args):
+    # tensorboard logs saved in 'log_dir/tb/', checkpoints in 'log_dir/checkpoints'
+    try:
+        os.mkdir(args.log_dir)
+        os.mkdir(args.log_dir + 'tb')
+        os.mkdir(args.log_dir + 'checkpoints')
+    except FileExistsError:
+        print('log_dir already exists')
+
+    # save training config
+    with open(args.log_dir + 'config.json', 'w') as f:
+        json.dump(vars(args), f, indent=4, sort_keys=True)
+
     # init env
-    train_env = init_env(args.env_name, args.train_env_num, frame_skip=args.frame_skip)
-    test_env = init_env(args.env_name, args.test_env_num, frame_skip=args.frame_skip)
+    train_env = init_env(args.env_name, args.train_env_num, action_repeat=args.action_repeat)
+    test_env = init_env(args.env_name, args.test_env_num, action_repeat=args.action_repeat)
 
     # init agent
     observation_size, action_size, image_env = parse_env(args.env_name)
@@ -66,7 +80,7 @@ def parse_args():
     parser.add_argument("--env_name", type=str)
     parser.add_argument("--normalize_obs", action='store_true', default=False)
     parser.add_argument("--normalize_reward", action='store_true', default=False)
-    parser.add_argument("--frame_skip", type=int)
+    parser.add_argument("--action_repeat", type=int)
     parser.add_argument("--train_env_num", type=int)
     parser.add_argument("--test_env_num", type=int)
 

@@ -120,6 +120,7 @@ class Beta(Distribution):
 
 
 class TanhNormal(Distribution):
+    # WARNING: for some reason, this distribution produces Nans in policy -_-
     def __init__(self):
         self.dist_fn = dist.Normal
 
@@ -141,9 +142,10 @@ class TanhNormal(Distribution):
     def _convert_parameters(parameters):
         action_size = parameters.size(-1) // 2
         mean, log_sigma = parameters.split(action_size, -1)
+        # some paper suggest to clip log_std to +-15, however I observe Nan-s with this values
+        log_sigma_clamp = torch.clamp(log_sigma, -20, +2)
         # forward: torch.clamp(log_sigma)
         # backward: log_sigma
-        log_sigma_clamp = torch.clamp(log_sigma, -5, +5)
         log_sigma = log_sigma_clamp.detach() - log_sigma.detach() + log_sigma
         sigma = log_sigma.exp()
         return mean, sigma
@@ -177,9 +179,22 @@ class TanhNormal(Distribution):
         return entropy.sum(-1)
 
 
+class Normal(TanhNormal):
+    # same as TanhNormal, but without tanh and arc-tanh
+    # entropy is nut used inside model...
+    @staticmethod
+    def _env_to_agent(action):
+        return action
+
+    @staticmethod
+    def _agent_to_env(action):
+        return action
+
+
 distributions_dict = {
     'Categorical': Categorical,
     'GumbelSoftmax': GumbelSoftmax,
     'Beta': Beta,
-    'TanhNormal': TanhNormal
+    'TanhNormal': TanhNormal,
+    'Normal': Normal
 }

@@ -46,5 +46,4 @@ class A2C(PolicyGradient):
         observations, actions, rewards, not_done = rollout_t
         result = self._main(policy, values, actions, returns, advantages)
 
-        result['reward'] = rewards.mean().item()
         return result

@@ -1,11 +1,58 @@
 # base class for policy gradient algorithms (A2C and PPO)
-import numpy as np
 import torch
 from torch.nn.utils import clip_grad_norm_
 
 from algorithms.distributions import distributions_dict
 from algorithms.nn import ActorCriticTwoMLP, ActorCriticAtari
 from algorithms.normalization import RunningMeanStd
+
+
+class PolicyGradientInference:
+    def __init__(
+            self,
+            image_env,
+            observation_size, action_size, hidden_size, device,
+            distribution
+    ):
+        self.device = device
+        self.distribution = distributions_dict[distribution]()
+
+        if image_env:
+            self.nn = ActorCriticAtari(action_size)
+        else:
+            self.nn = ActorCriticTwoMLP(
+                observation_size, action_size, hidden_size
+            )
+
+        self.nn.to(device)
+        self.obs_normalizer = None
+
+    def load(self, filename):
+        checkpoint = torch.load(filename)
+        for k, v in checkpoint.items():
+            print(k)
+        self.nn.load_state_dict(checkpoint['agent']['nn'])
+        if 'obs_normalizer' in checkpoint:
+            self.obs_normalizer = RunningMeanStd()
+            self.obs_normalizer.load_state_dict(checkpoint['obs_normalizer'])
+
+    def eval(self):
+        self.nn.eval()
+
+    def act(self, observations, deterministic=False):
+        """
+        :param observations: np.array of observation, shape = [T, B, dim(obs)]
+        :param deterministic: True or False
+        :return: action, np.array of shape = [T, B, dim(action)]
+        """
+        if self.obs_normalizer is not None:
+            mean, var = self.obs_normalizer.mean, self.obs_normalizer.var
+            observations = (observations - mean) / (var + 1e-8)
+        with torch.no_grad():
+            policy, _ = self.nn(torch.tensor(observations, dtype=torch.float32, device=self.device))
+        action = self.distribution.sample(policy, deterministic)
+        action = action.cpu().numpy()
+        return action
 
 
 class PolicyGradient:
@@ -34,7 +81,6 @@ class PolicyGradient:
         # policy.size() == (T, B, dim(A) or 2 * dim(A))
         # value.size() == (T, B)  - there is no '1' at the last dimension!
 
-        # WARNING: nn MUST be called ONLY inside _call_nn method!
         if image_env:
             self.nn = ActorCriticAtari(action_size)
         else:
@@ -53,45 +99,52 @@ class PolicyGradient:
         self.entropy = entropy
         self.clip_grad = clip_grad
 
-    def save_jit(self, filename):
-        pass
+    def state_dict(self):
+        state_dict = {
+            'nn': self.nn.state_dict(),
+            'opt': self.opt.state_dict()
+        }
+        return state_dict
 
-    def save(self, filename, normalizer):
+    def load_state_dict(self, state_dict):
+        self.nn.load_state_dict(state_dict['nn'])
+        self.opt.load_state_dict(state_dict['opt'])
+
+    def save(self, filename, obs_normalizer=None, reward_normalizer=None):
         """
         Saves nn and optimizer into a file
         :param filename: str
-        :param normalizer: RunningMeanStd object or None
+        :param obs_normalizer: RunningMeanStd object
+        :param reward_normalizer: RunningMeanStd object
         """
         state_dict = {
             'nn': self.nn.state_dict(),
             'opt': self.opt.state_dict(),
         }
-        if normalizer is not None:
-            state_dict['normalizer'] = normalizer.state_dict()
+        if obs_normalizer is not None:
+            state_dict['obs_normalizer'] = obs_normalizer.state_dict()
+        if reward_normalizer is not None:
+            state_dict['reward_normalizer'] = reward_normalizer.state_dict()
         torch.save(state_dict, filename)
 
     def load(self, filename):
         checkpoint = torch.load(filename)
         self.nn.load_state_dict(checkpoint['nn'])
         self.opt.load_state_dict(checkpoint['opt'])
-        if checkpoint.get('normalizer'):
-            normalizer = RunningMeanStd()
-            normalizer.load_state_dict(checkpoint['normalizer'])
-            return normalizer
 
     def train(self):
         self.training = True
-        self.nn.eval()
+        self.nn.train()
 
     def eval(self):
         self.training = False
-        self.nn.train()
+        self.nn.eval()
 
     def act(self, observations, deterministic=False):
         """
         :param observations: np.array of observation, shape = [T, B, dim(obs)]
         :param deterministic: True or False
-        :return: action, np.array of shape = [T, B, dim(action)]
+        :return: action, torch.Tensor of shape = [T, B, dim(action)], with gradients
         """
         policy, _ = self.nn(
             torch.tensor(observations, dtype=torch.float32, device=self.device)

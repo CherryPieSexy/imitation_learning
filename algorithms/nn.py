@@ -55,17 +55,14 @@ class ActorCriticTwoMLP(nn.Module):
             init(nn.Linear(hidden_size, 1))
         )
 
-        self.actor_mean = nn.Sequential(
+        self.actor = nn.Sequential(
             init(nn.Linear(observation_size, hidden_size), gain=gain), nn.Tanh(),
             init(nn.Linear(hidden_size, hidden_size), gain=gain), nn.Tanh(),
-            init(nn.Linear(hidden_size, action_size), gain=gain_policy)
+            init(nn.Linear(hidden_size, 2 * action_size), gain=gain_policy)
         )
-        self.actor_log_std = nn.Parameter(torch.zeros(1, action_size))
 
     def forward(self, observation):
-        mean = self.actor_mean(observation)
-        log_std = self.actor_log_std.expand_as(mean)
-        policy = torch.cat((mean, log_std), -1)
+        policy = self.actor(observation)
         value = self.critic(observation).squeeze(-1)
         return policy, value
 
@@ -101,3 +98,33 @@ class ActorCriticAtari(nn.Module):
         flatten = conv.view(time, batch, -1)  # (T*B, C', H', W') -> (T, B, C' * H' * W')
         f = self.fe(flatten)
         return self.policy(f), self.value(f).squeeze(-1)
+
+
+class ModelMLP(nn.Module):
+    # predicts p(s'|s, a)
+    def __init__(
+            self,
+            observation_size, action_size, hidden_size,
+            predict_reward,
+            predict_log_sigma
+    ):
+        super().__init__()
+
+        self.predict_log_sigma = predict_log_sigma
+        self.fe = nn.Sequential(
+            nn.Linear(observation_size + action_size, hidden_size), nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size), nn.ReLU(),
+        )
+        if predict_reward:
+            observation_size += 1
+        if predict_log_sigma:
+            # predict parameters for N(mu, sigma)
+            self.last_layer = nn.Linear(hidden_size, 2 * observation_size)
+        else:
+            # predict just next state
+            self.last_layer = nn.Linear(hidden_size, observation_size)
+
+    def forward(self, observation, action):
+        x = torch.cat((observation, action), dim=-1)
+        x = self.fe(x)
+        return self.last_layer(x)

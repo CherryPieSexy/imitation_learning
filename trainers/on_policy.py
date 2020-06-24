@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import torch
 from tqdm import trange
@@ -27,12 +26,8 @@ class OnPolicyTrainer:
         self._test_env = test_env
 
         # normalizers:
-        self._normalize_obs = normalize_obs
-        if normalize_obs:
-            self._obs_normalizer = RunningMeanStd()
-        self._normalize_reward = normalize_reward
-        if normalize_reward:
-            self._reward_normalizer = RunningMeanStd()
+        self._obs_normalizer = RunningMeanStd() if normalize_obs else None
+        self._reward_normalizer = RunningMeanStd() if normalize_reward else None
 
         # store episode reward and number for each train environment
         self._env_reward = np.zeros(train_env.num_envs, dtype=np.float32)
@@ -40,15 +35,15 @@ class OnPolicyTrainer:
 
         self._log_dir = log_dir
 
-        try:
-            os.mkdir(self._log_dir)
-            os.mkdir(self._log_dir + 'tb')
-            os.mkdir(self._log_dir + 'checkpoints')
-        except FileExistsError:
-            print('log_dir already exists')
+        self._writer = SummaryWriter(log_dir + 'tb/')
 
-        # tensorboard logs saved in 'log_dir/tb/', checkpoints in 'log_dir/checkpoints'
-        self._writer = SummaryWriter(log_dir + 'tb/')  # instantiate this
+    def save(self, filename):
+        state_dict = {'agent': self._agent.state_dict()}
+        if self._obs_normalizer is not None:
+            state_dict['obs_normalizer'] = self._obs_normalizer.state_dict()
+        if self._reward_normalizer is not None:
+            state_dict['reward_normalizer'] = self._reward_normalizer.state_dict()
+        torch.save(state_dict, filename)
 
     @staticmethod
     def stack_infos(infos):
@@ -61,43 +56,47 @@ class OnPolicyTrainer:
             stacked_info[key] = np.stack(values)
         return stacked_info
 
-    def _act(self, observation, training, deterministic):
-        if self._normalize_obs:
-            if training:
-                self._obs_normalizer.update(observation)
-            mean, var = self._obs_normalizer.mean, self._obs_normalizer.var
-            observation = (observation - mean) / np.sqrt(var + 1e-8)
+    def _act(self, observation, deterministic):
         with torch.no_grad():
             action = self._agent.act(observation, deterministic)
         return action.cpu().numpy()
 
     def _gather_rollout(self, observation, rollout_len):
+        # this function only called when agent is trained
+        # initial observation must be normalized
         observations, actions, rewards, is_done = [observation], [], [], []
+        rollout_mean_reward = 0.0  # raw reward from environment
         for _ in range(rollout_len):
             # on-policy trainer does not requires actions to be differentiable
             # however, agent may be used by different algorithms which may require that
             with torch.no_grad():
-                action = self._act(observation, training=True, deterministic=False)
+                action = self._act(observation, deterministic=False)
 
             observation, reward, done, _ = self._train_env.step(action)
+            self._env_reward += reward
+            reward = np.clip(reward, -1, 100)
+            rollout_mean_reward += np.mean(reward)
+
+            if self._obs_normalizer is not None:
+                self._obs_normalizer.update(observation)
+                mean, var = self._obs_normalizer.mean, self._obs_normalizer.var
+                observation = (observation - mean) / np.sqrt(var + 1e-8)
+
+            if self._reward_normalizer is not None:
+                self._reward_normalizer.update(reward)
+                mean, var = self._reward_normalizer.mean, self._reward_normalizer.var
+                reward = (reward - mean) / np.sqrt(var + 1e-8)
 
             observations.append(observation)
             actions.append(action)
             is_done.append(done)
 
-            self._env_reward += reward
-            reward = np.clip(reward, -1, 100)
-
-            if self._normalize_reward:
-                self._reward_normalizer.update(reward)
-                mean, var = self._reward_normalizer.mean, self._reward_normalizer.var
-                reward = (reward - mean) / np.sqrt(var + 1e-8)
-
             rewards.append(reward)
             self._done_callback(done)
 
         rollout = observations, actions, rewards, is_done
-        return rollout, observation
+        rollout_mean_reward /= rollout_len
+        return rollout, observation, rollout_mean_reward
 
     def _done_callback(self, done):
         if np.any(done):
@@ -117,8 +116,9 @@ class OnPolicyTrainer:
 
     def _train_step(self, observation, rollout_len, step):
         # gather rollout -> train on it -> write training logs
-        rollout, observation = self._gather_rollout(observation, rollout_len)
+        rollout, observation, rollout_mean_reward = self._gather_rollout(observation, rollout_len)
         train_logs = self._agent.train_on_rollout(rollout)
+        train_logs['reward'] = rollout_mean_reward
         self._write_logs('train/', train_logs, step)
         return observation
 
@@ -130,7 +130,10 @@ class OnPolicyTrainer:
         episode_rewards = []
 
         while len(episode_rewards) < n_tests:
-            action = self._act(observation, training=False, deterministic=True)
+            if self._obs_normalizer is not None:
+                mean, var = self._obs_normalizer.mean, self._obs_normalizer.var
+                observation = (observation - mean) / np.sqrt(var + 1e-8)
+            action = self._act(observation, deterministic=True)
             observation, reward, done, _ = self._test_env.step(action)
             env_reward += reward
             if np.any(done):
@@ -160,6 +163,10 @@ class OnPolicyTrainer:
         :return:
         """
         observation = self._train_env.reset()
+        if self._obs_normalizer is not None:
+            self._obs_normalizer.update(observation)
+            mean, var = self._obs_normalizer.mean, self._obs_normalizer.var
+            observation = (observation - mean) / np.sqrt(var + 1e-8)
         self._test_agent(0, n_tests)
 
         for epoch in range(n_epoch):
@@ -169,9 +176,8 @@ class OnPolicyTrainer:
                 observation = self._train_step(
                     observation, rollout_len, train_step + epoch * n_steps
                 )
-            # TODO: for some reason tensorboard does not contain test reward after last epoch.
-            #  Need to figure out why and fix
             self._agent.eval()
             self._test_agent(epoch + 1, n_tests)
             checkpoint_name = self._log_dir + 'checkpoints/' + f'epoch_{epoch}.pth'
-            self._agent.save(checkpoint_name)
+            self.save(checkpoint_name)
+        self._writer.close()
