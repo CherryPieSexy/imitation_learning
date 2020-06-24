@@ -1,4 +1,5 @@
 # base class for policy gradient algorithms (A2C and PPO)
+import numpy as np
 import torch
 from torch.nn.utils import clip_grad_norm_
 
@@ -29,8 +30,6 @@ class PolicyGradientInference:
 
     def load(self, filename):
         checkpoint = torch.load(filename)
-        for k, v in checkpoint.items():
-            print(k)
         self.nn.load_state_dict(checkpoint['agent']['nn'])
         if 'obs_normalizer' in checkpoint:
             self.obs_normalizer = RunningMeanStd()
@@ -47,7 +46,7 @@ class PolicyGradientInference:
         """
         if self.obs_normalizer is not None:
             mean, var = self.obs_normalizer.mean, self.obs_normalizer.var
-            observations = (observations - mean) / (var + 1e-8)
+            observations = (observations - mean) / np.sqrt(var + 1e-8)
         with torch.no_grad():
             policy, _ = self.nn(torch.tensor(observations, dtype=torch.float32, device=self.device))
         action = self.distribution.sample(policy, deterministic)
