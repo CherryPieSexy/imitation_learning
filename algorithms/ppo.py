@@ -15,6 +15,7 @@ class PPO(PolicyGradient):
             ppo_n_epoch,
             ppo_mini_batch,
             use_ppo_value_loss,
+            recompute_advantage,
             **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -22,6 +23,7 @@ class PPO(PolicyGradient):
         self.ppo_n_epoch = ppo_n_epoch
         self.ppo_mini_batch = ppo_mini_batch
         self.use_ppo_value_loss = use_ppo_value_loss
+        self.recompute_advantage = recompute_advantage
 
     def _policy_loss(self, policy_old, policy, actions, advantage):
         # clipped policy objective
@@ -42,7 +44,7 @@ class PPO(PolicyGradient):
         return policy_loss.mean()
 
     def _clipped_value_loss(self, values_old, values, returns):
-        # clipped value objective, PPO-style
+        # clipped value loss, PPO-style
         clipped_value = values_old + torch.clamp(
             (values - values_old), -self.ppo_epsilon, self.ppo_epsilon
         )
@@ -55,6 +57,7 @@ class PPO(PolicyGradient):
 
     @staticmethod
     def _mse_value_loss(values, returns):
+        # simple MSE loss, works better than clipped PPO-style
         value_loss = 0.5 * ((values - returns) ** 2)
         return value_loss.mean()
 
@@ -67,11 +70,12 @@ class PPO(PolicyGradient):
 
     def _calc_losses(
             self,
-            policy_old, values_old,
+            policy_old,
             policy, values, actions,
             returns, advantage
     ):
-        value_loss = self._value_loss(values_old, values, returns)
+        # value_loss = self._value_loss(values_old, values, returns)
+        value_loss = self._mse_value_loss(values, returns)
         policy_loss = self._policy_loss(policy_old, policy, actions, advantage)
         entropy = self.distribution.entropy(policy, actions).mean()
         loss = value_loss - policy_loss - self.entropy * entropy
@@ -79,11 +83,17 @@ class PPO(PolicyGradient):
 
     def _ppo_train_step(
             self,
-            observations, actions,
-            policy_old, values_old,
-            returns, advantage
+            observations, actions, rewards, not_done,
+            policy_old,
+            returns, advantage, step
     ):
-        # 1) sample subset of indices to optimize on, select rollout[indices]
+        # 1) call nn, recompute returns and advantage if needed
+        if self.recompute_advantage and step != 0:
+            policy, value, returns, advantage = self._compute_returns(observations, rewards, not_done)
+        else:
+            policy, value = self.nn(observations[:-1])
+
+        # 2) sample subset of indices to optimize on
         time, batch = actions.size()[:2]
         flatten_indices = torch.randint(
             time * batch,
@@ -94,15 +104,10 @@ class PPO(PolicyGradient):
         row = flatten_indices // batch
         col = flatten_indices - batch * row
 
-        # 2) calculate losses and optimize
-        policy, values = self.nn(observations[row, col])
-        # here we already have precomputed returns, advantages
-        # and select only observations to optimize on,
-        # so we do not need to drop last policy step like in A2C
-
+        # 3) calculate losses and optimize
         value_loss, policy_loss, entropy, loss = self._calc_losses(
-            policy_old[row, col], values_old[row, col],
-            policy, values,  # computed values already have desired shapes
+            policy_old[row, col],
+            policy[row, col], value[row, col],
             actions[row, col], returns[row, col], advantage[row, col]
         )
         grad_norm = self._optimize_loss(loss)
@@ -115,47 +120,29 @@ class PPO(PolicyGradient):
         }
         return result
 
-    def _main(
-            self,
-            observations, actions,
-            policy_old, values_old,
-            returns, advantage
-    ):
-        # both returns and advantages estimated once
-        # at the beginning of iteration, i.e. with \theta_old,
-        # inside 'loss_on_rollout' method
-
-        policy_old, values_old = policy_old.detach(), values_old.detach()
-        ppo_result = defaultdict(float)
-
-        n = self.ppo_n_epoch
-        for ppo_epoch in range(n):
-            ppo_step_result = self._ppo_train_step(
-                observations, actions,
-                policy_old, values_old,
-                returns, advantage
-            )
-            for key, value in ppo_step_result.items():
-                ppo_result[key] += value / n
-
-        return ppo_result
-
     def train_on_rollout(self, rollout):
         """
         :param rollout: tuple (observations, actions, rewards, is_done),
                where each one is np.array of shape [time, batch, ...] except observations,
                observations of shape [time + 1, batch, ...]
-        :return: dict of loss values, gradient norm, mean reward on rollout
+        :return: dict of loss values, gradient norm
         """
+        observations, actions, rewards, not_done = self._rollout_to_tensors(rollout)
 
+        result = defaultdict(float)
         with torch.no_grad():
-            rollout_t, policy, values, returns, advantages = self._preprocess_rollout(rollout)
-        observations, actions, rewards, not_done = rollout_t
+            policy_old, _, returns, advantage = self._compute_returns(
+                observations, rewards, not_done
+            )
 
-        result = self._main(
-            observations, actions,
-            policy, values,
-            returns, advantages
-        )
+        n = self.ppo_n_epoch
+        for ppo_epoch in range(n):
+            step_result = self._ppo_train_step(
+                observations, actions, rewards, not_done,
+                policy_old,
+                returns, advantage, ppo_epoch
+            )
+            for key, value in step_result.items():
+                result[key] += value / n
 
         return result

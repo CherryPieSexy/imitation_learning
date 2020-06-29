@@ -207,27 +207,24 @@ class PolicyGradient:
         self.opt.step()
         return gradient_norm
 
-    def _preprocess_rollout(self, rollout):
+    def _compute_returns(self, observations, rewards, not_done):
+        policy, value = self.nn(observations)
+        policy = policy[:-1]
+        value, next_value = value[:-1], value[1:].detach()
+
+        returns = self._estimate_returns(value, next_value, rewards, not_done)
+        advantage = (returns - value).detach()
+        if self.normalize_adv:
+            advantage = self._normalize_advantages(advantage)
+        return policy, value, returns, advantage
+
+    def _rollout_to_tensors(self, rollout):
         def to_tensor(x):
             return torch.tensor(x, dtype=torch.float32, device=self.device)
 
         observations, actions, rewards, is_done = list(map(to_tensor, rollout))
-        policy, values = self.nn(observations)
-        policy = policy[:-1]
-        values, next_values = values[:-1], values[1:].detach()
         not_done = 1.0 - is_done
-
-        returns = self._estimate_returns(values, next_values, rewards, not_done)
-        advantages = (returns - values).detach()
-        # for PPO advantage must be normalized here,
-        # so we must feed values and returns separately to compute value loss
-
-        if self.normalize_adv:
-            advantages = self._normalize_advantages(advantages)
-
-        rollout_t = (observations, actions, rewards, not_done)
-
-        return rollout_t, policy, values, returns, advantages
+        return observations, actions, rewards, not_done
 
     def train_on_rollout(self, *args, **kwargs):
         raise NotImplementedError

@@ -57,7 +57,8 @@ def main(args):
         gae_lambda=args.gae_lambda,
         ppo_epsilon=args.ppo_epsilon, ppo_n_epoch=args.ppo_n_epoch,
         ppo_mini_batch=args.ppo_mini_batch,
-        use_ppo_value_loss=False
+        use_ppo_value_loss=False,
+        recompute_advantage=args.recompute_advantage
     )
 
     # init and run trainer
@@ -91,6 +92,7 @@ def parse_args():
     # policy & advantage
     parser.add_argument("--policy", type=str)
     parser.add_argument("--normalize_adv", action='store_true')
+    parser.add_argument("--recompute_advantage", action='store_true')
     parser.add_argument("--returns_estimator", type=str)
 
     # optimization

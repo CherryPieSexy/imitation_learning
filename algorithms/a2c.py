@@ -39,11 +39,11 @@ class A2C(PolicyGradient):
         :param rollout: tuple (observations, actions, rewards, is_done),
                where each one is np.array of shape [time, batch, ...] except observations,
                observations of shape [time + 1, batch, ...]
-        :return: dict of loss values, gradient norm, mean reward on rollout
+        :return: dict of loss values, gradient norm
         """
+        observations, actions, rewards, not_done = self._rollout_to_tensors(rollout)
 
-        rollout_t, policy, values, returns, advantages = self._preprocess_rollout(rollout)
-        observations, actions, rewards, not_done = rollout_t
-        result = self._main(policy, values, actions, returns, advantages)
+        policy, values, returns, advantage = self._compute_returns(observations, rewards, not_done)
 
+        result = self._main(policy, values, actions, returns, advantage)
         return result
