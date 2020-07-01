@@ -127,12 +127,12 @@ class TanhNormal(Distribution):
     @staticmethod
     def _agent_to_env(action):
         action = torch.tanh(action)
-        action = torch.clamp(action, -0.999, +0.999)
+        # action = torch.clamp(action, -0.999, +0.999)
         return action
 
     @staticmethod
     def _env_to_agent(action):
-        action = torch.clamp(action, -0.999, +0.999)
+        # action = torch.clamp(action, -0.999, +0.999)
         # noinspection PyTypeChecker
         action = (1.0 + action) / (1.0 - action)
         action = 0.5 * torch.log(action)
@@ -147,7 +147,7 @@ class TanhNormal(Distribution):
         # forward: torch.clamp(log_sigma)
         # backward: log_sigma
         log_sigma = log_sigma_clamp.detach() - log_sigma.detach() + log_sigma
-        sigma = log_sigma.exp()
+        sigma = log_sigma.exp()  # works MUCH better with this 0.5
         return mean, sigma
 
     def sample(self, parameters, deterministic):
@@ -189,6 +189,12 @@ class Normal(TanhNormal):
     @staticmethod
     def _agent_to_env(action):
         return action
+
+    def entropy(self, parameters, *args, **kwargs):
+        mean, sigma = self._convert_parameters(parameters)
+        distribution = self.dist_fn(mean, sigma)
+        entropy = distribution.entropy()
+        return entropy.sum(-1)
 
 
 distributions_dict = {

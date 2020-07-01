@@ -16,6 +16,7 @@ class OnPolicyTrainer:
             self,
             agent, train_env, test_env,
             normalize_obs, normalize_reward,
+            reward_clip_min, reward_clip_max,
             log_dir
     ):
         self._agent = agent
@@ -28,6 +29,8 @@ class OnPolicyTrainer:
         # normalizers:
         self._obs_normalizer = RunningMeanStd() if normalize_obs else None
         self._reward_normalizer = RunningMeanStd() if normalize_reward else None
+        self._reward_clip_min = reward_clip_min
+        self._reward_clip_max = reward_clip_max
 
         # store episode reward and number for each train environment
         self._env_reward = np.zeros(train_env.num_envs, dtype=np.float32)
@@ -44,6 +47,14 @@ class OnPolicyTrainer:
         if self._reward_normalizer is not None:
             state_dict['reward_normalizer'] = self._reward_normalizer.state_dict()
         torch.save(state_dict, filename)
+
+    def load(self, filename):
+        checkpoint = torch.load(filename)
+        self._agent.load_state_dict(checkpoint['agent'])
+        if 'obs_normalizer' in checkpoint:
+            self._obs_normalizer.load_state_dict(checkpoint['obs_normalizer'])
+        if 'reward_normalizer' in checkpoint:
+            self._reward_normalizer.load_state_dict(checkpoint['reward_normalizer'])
 
     @staticmethod
     def stack_infos(infos):
@@ -73,8 +84,9 @@ class OnPolicyTrainer:
                 action = self._act(observation, deterministic=False)
 
             observation, reward, done, _ = self._train_env.step(action)
-            self._env_reward += reward
-            reward = np.clip(reward, -1, 100)
+            self._env_reward += reward  # add raw reward here
+            reward = np.clip(reward, self._reward_clip_min, self._reward_clip_max)
+
             rollout_mean_reward += np.mean(reward)
 
             if self._obs_normalizer is not None:

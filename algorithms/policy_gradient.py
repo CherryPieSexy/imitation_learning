@@ -19,10 +19,10 @@ class PolicyGradientInference:
         self.distribution = distributions_dict[distribution]()
 
         if image_env:
-            self.nn = ActorCriticAtari(action_size)
+            self.nn = ActorCriticAtari(action_size, distribution)
         else:
             self.nn = ActorCriticTwoMLP(
-                observation_size, action_size, hidden_size
+                observation_size, action_size, hidden_size, distribution
             )
 
         self.nn.to(device)
@@ -81,10 +81,10 @@ class PolicyGradient:
         # value.size() == (T, B)  - there is no '1' at the last dimension!
 
         if image_env:
-            self.nn = ActorCriticAtari(action_size)
+            self.nn = ActorCriticAtari(action_size, distribution)
         else:
             self.nn = ActorCriticTwoMLP(
-                observation_size, action_size, hidden_size
+                observation_size, action_size, hidden_size, distribution
             )
 
         self.nn.to(device)
