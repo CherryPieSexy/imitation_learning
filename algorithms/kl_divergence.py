@@ -1,0 +1,45 @@
+import torch
+import torch.distributions as dist
+
+from algorithms.distributions import convert_parameters_beta, convert_parameters_normal
+
+
+def _d_kl_categorical(p, q):
+    # categorical distribution parametrized by logits
+    logits_diff = p - q
+    p_probs = torch.softmax(p, dim=-1)
+    d_kl = (p_probs * logits_diff).sum(-1)
+    return d_kl
+
+
+def _d_kl_normal(p, q):
+    # p = target, q = online
+    p_mean, p_sigma = convert_parameters_normal(p)
+    q_mean, q_sigma = convert_parameters_normal(q)
+
+    mean_diff = ((q_mean - p_mean) / q_sigma).pow(2)
+    var_ratio = (p_sigma / q_sigma).pow(2)
+
+    d_kl = 0.5 * (var_ratio + mean_diff - 1 - var_ratio.log())
+    return d_kl.mean(-1)
+
+
+def _d_kl_beta(p, q):
+    alpha_p, beta_p = convert_parameters_beta(p)
+    alpha_q, beta_q = convert_parameters_beta(q)
+    dist_p = dist.Beta(alpha_p, beta_p)
+    dist_q = dist.Beta(alpha_q, beta_q)
+    d_kl = dist.kl_divergence(dist_p, dist_q).mean(-1)
+    return d_kl
+
+
+d_kl_dict = {
+    'Categorical': _d_kl_categorical,
+    'Normal': _d_kl_normal,
+    # 'TanhNormal': _d_kl_normal,  does not work :(
+    'Beta': _d_kl_beta
+}
+
+
+def kl_divergence(distribution, p, q):
+    return d_kl_dict[distribution](p, q)

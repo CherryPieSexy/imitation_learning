@@ -3,6 +3,7 @@ from collections import defaultdict
 import torch
 import numpy as np
 
+from utils.utils import time_it
 from algorithms.policy_gradient import PolicyGradient
 
 
@@ -41,6 +42,7 @@ class PPO(PolicyGradient):
         :param ppo_n_epoch:         int, number of training epoch on one rollout
         :param ppo_n_mini_batches:  int, number of mini-batches into which
                                     the training data is divided during one epoch
+
         :param kwargs:
         """
         super().__init__(*args, **kwargs)
@@ -53,9 +55,10 @@ class PPO(PolicyGradient):
         self.ppo_n_mini_batches = ppo_n_mini_batches
 
     def _policy_loss(self, policy_old, policy, actions, advantage):
-        log_pi_for_actions_old = self.distribution.log_prob(policy_old, actions)
+        log_pi_for_actions_old = policy_old
         log_pi_for_actions = self.distribution.log_prob(policy, actions)
         log_prob_ratio = log_pi_for_actions - log_pi_for_actions_old
+        log_prob_ratio.clamp_max_(20)
 
         prob_ratio = log_prob_ratio.exp()
         if self.rollback_alpha > 0:
@@ -135,30 +138,53 @@ class PPO(PolicyGradient):
         loss = value_loss - policy_loss - self.entropy * entropy
         return value_loss, policy_loss, entropy, loss
 
+    @time_it
     def _ppo_train_step(
             self,
+            step,
             rollout_t, row, col,
             policy_old, returns, advantage
     ):
         observations, actions, rewards, not_done = rollout_t
         # 1) call nn, recompute returns and advantage if needed
-        if self.recompute_advantage:  # one unnecessary call during the first train-op
-            # to compute returns and advantage we have to call nn.forward(...) on full data
+        # advantage always computed by training net,
+        # so it is unnecessary to recompute adv at the first train-op
+        if self.recompute_advantage and step != 0:
+            # to compute returns and advantage we _have_ to call nn.forward(...) on full data
             policy, value, returns, advantage = self._compute_returns(observations, rewards, not_done)
             policy, value = policy[row, col], value[row, col]
         else:
             # here we can call nn.forward(...) only on interesting data
-            policy, value = self.nn(observations[row, col])
+            # observations[row, col] has only batch dimension =>
+            # need to unsqueeze and squeeze back
+            policy, value = self.nn(observations[row, col].unsqueeze(0))
+            policy, value = policy.squeeze(0), value.squeeze(0)
 
-        # 2) calculate losses and optimize
+        # 2) calculate losses
         value_loss, policy_loss, entropy, loss = self._calc_losses(
             policy_old[row, col],
             policy, value,
             actions[row, col], returns[row, col], advantage[row, col]
         )
+
+        # 3) calculate image_aug loss if needed
+        if self.image_augmentation_alpha > 0.0:
+            (policy_div, value_div), img_aug_time = self._augmentation_loss(
+                policy.detach().unsqueeze(0),
+                value.detach().unsqueeze(0),
+                observations[row, col].unsqueeze(0)
+            )
+            loss += self.image_augmentation_alpha * (policy_div + value_div)
+            upd = {
+                'policy_div': policy_div.item(),
+                'value_div': value_div.item(),
+                'img_aug_time': img_aug_time
+            }
+
+        # optimize
         grad_norm = self._optimize_loss(loss)
 
-        # 3) store training results in dict and return
+        # 4) store training results in dict and return
         result = {
             'value_loss': value_loss.item(),
             'policy_loss': policy_loss.item(),
@@ -166,8 +192,12 @@ class PPO(PolicyGradient):
             'loss': loss.item(),
             'grad_norm': grad_norm
         }
+        if self.image_augmentation_alpha > 0.0:
+            # noinspection PyUnboundLocalVariable
+            result.update(upd)
         return result
 
+    @time_it
     def _ppo_epoch(
             self,
             rollout_t, time, batch,
@@ -175,49 +205,74 @@ class PPO(PolicyGradient):
     ):
         # goes once trough rollout
         epoch_result = defaultdict(float)
+        mean_train_op_time = 0
 
-        # 1) select indices to train on during epoch
+        # select indices to train on during epoch
         n_transitions = time * batch
         flatten_indices = np.arange(n_transitions)
         np.random.shuffle(flatten_indices)
-        n_batch_train = n_transitions // self.ppo_n_mini_batches
 
-        for start_id in range(0, n_transitions, n_batch_train):
+        num_batches = self.ppo_n_mini_batches
+        # n_batch_train = number of elements to train-on, i.e. batch-size
+        n_batch_train = n_transitions // num_batches
+
+        for step, start_id in enumerate(range(0, n_transitions, n_batch_train)):
             indices_to_train_on = flatten_indices[start_id:start_id + n_batch_train]
             row = indices_to_train_on // batch
             col = indices_to_train_on - batch * row
 
-            step_result = self._ppo_train_step(
+            train_op_result, train_op_time = self._ppo_train_step(
+                step,
                 rollout_t, row, col,
                 policy_old, returns, advantage
             )
 
-            for key, value in step_result.items():
-                epoch_result[key] += value / n_batch_train
+            for key, value in train_op_result.items():
+                epoch_result[key] += value / num_batches
+            mean_train_op_time += train_op_time
 
-        return epoch_result
+        return epoch_result, mean_train_op_time / num_batches
 
-    def train_on_rollout(self, rollout):
+    def _train_fn(self, rollout):
         """
-        :param rollout: tuple (observations, actions, rewards, is_done),
+        :param rollout: tuple (observations, actions, rewards, is_done, log_probs),
                where each one is np.array of shape [time, batch, ...] except observations,
                observations of shape [time + 1, batch, ...]
-        :return: dict of loss values, gradient norm
+               I want to store 'log_probs' inside rollout
+               because online policy (i.e. the policy gathered rollout)
+               may not be the trained policy
+        :return: (loss_dict, time_dict)
         """
-        observations, actions, rewards, not_done = self._rollout_to_tensors(rollout)
+        # 'done' converts into 'not_done' inside '_rollout_to_tensors' method
+        observations, actions, rewards, not_done, policy_old = self._rollout_to_tensors(rollout)
+        policy_old = policy_old.squeeze(1)
         time, batch = actions.size()[:2]
         rollout_t = (observations, actions, rewards, not_done)
 
-        result = defaultdict(float)
+        result_log = defaultdict(float)
+
+        mean_epoch_time = 0
+        mean_train_op_time = 0
+        time_log = dict()
+
         with torch.no_grad():
-            policy_old, _, returns, advantage = self._compute_returns(
+            _, _, returns, advantage = self._compute_returns(
                 observations, rewards, not_done
             )
 
         n = self.ppo_n_epoch
         for ppo_epoch in range(n):
-            step_result = self._ppo_epoch(rollout_t, time, batch, policy_old, returns, advantage)
-            for key, value in step_result.items():
-                result[key] += value / n
+            (epoch_result, mean_train_op_time), epoch_time = self._ppo_epoch(
+                rollout_t, time, batch, policy_old, returns, advantage
+            )
+            for key, value in epoch_result.items():
+                result_log[key] += value / n
 
-        return result
+            mean_epoch_time += epoch_time
+
+        time_log['mean_ppo_epoch'] = mean_epoch_time / n
+        time_log['mean_train_op'] = mean_train_op_time / n
+        if self.image_augmentation_alpha > 0.0:
+            time_log['img_aug'] = result_log.pop('img_aug_time')
+
+        return result_log, time_log

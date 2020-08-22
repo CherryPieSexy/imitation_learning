@@ -35,17 +35,17 @@ class ActorCriticTwoMLP(nn.Module):
         if distribution == 'Beta':
             action_size *= 2
         elif distribution in ['TanhNormal', 'Normal']:
-            self.actor_log_std = nn.Parameter(torch.full(action_size, -1.34))
+            # self.actor_log_std = nn.Parameter(torch.full((action_size,), -1.34))
+            self.actor_log_std = nn.Parameter(torch.zeros(action_size))
 
         self.policy = nn.Sequential(
             init(nn.Linear(observation_size, hidden_size), gain=gain), nn.Tanh(),
             init(nn.Linear(hidden_size, hidden_size), gain=gain), nn.Tanh(),
-            init(nn.Linear(hidden_size, 2 * action_size), gain=gain_policy)
+            init(nn.Linear(hidden_size, action_size), gain=gain_policy)
         )
         self.distribution = distribution
 
     def forward(self, observation):
-        value = self.critic(observation).squeeze(-1)
         if self.distribution in ['TanhNormal', 'Normal']:
             mean = self.policy(observation)
             log_std = self.actor_log_std.expand_as(mean)
@@ -56,8 +56,8 @@ class ActorCriticTwoMLP(nn.Module):
         return policy, value
 
 
-class ActorCriticAtari(nn.Module):
-    # 2-layer CNN from DQN paper
+class ActorCriticCNN(nn.Module):
+    # simple 3-layer CNN with ELU activation
     def __init__(
             self,
             action_size, distribution
@@ -66,39 +66,45 @@ class ActorCriticAtari(nn.Module):
 
         gain = nn.init.calculate_gain('relu')
         gain_policy = 0.01
-        # (4, 84, 84) -> (32, 9, 9)
+        hidden_size = 128
+        # (4, 42, 42) -> (32, 4, 4)
         self.conv = nn.Sequential(
-            init(nn.Conv2d(4, 16, kernel_size=8, stride=4), gain=gain),
-            nn.ReLU(),
-            init(nn.Conv2d(16, 32, kernel_size=4, stride=2), gain=gain),
-            nn.ReLU()
+            init(nn.Conv2d(4, 32, kernel_size=3, stride=2), gain=gain), nn.ELU(),
+            init(nn.Conv2d(32, 32, kernel_size=3, stride=2), gain=gain), nn.ELU(),
+            init(nn.Conv2d(32, 32, kernel_size=3, stride=2), gain=gain), nn.ELU()
         )
-        self.fe = init(nn.Linear(32 * 9 * 9, 256))
+        self.fe = init(nn.Linear(512, hidden_size))
 
-        if distribution == 'Beta':
+        if distribution in ['Beta', 'TanhNormal', 'Normal']:
             action_size *= 2
-        elif distribution in ['TanhNormal', 'Normal']:
-            self.actor_log_std = nn.Parameter(torch.full(action_size, -1.34))
 
-        self.policy = init(nn.Linear(256, action_size), gain=gain_policy)
-        self.value = init(nn.Linear(256, 1))
+        self.policy = init(nn.Linear(hidden_size, action_size), gain=gain_policy)
+        self.value = init(nn.Linear(hidden_size, 1))
         self.distribution = distribution
 
-    def forward(self, observation):
+    def _cnn_forward(self, observation):
         # observation is an image of size (T, B, C, H, W)
         obs_size = observation.size()
         (time, batch), chw = obs_size[:2], obs_size[2:]
         observation = observation.view(time * batch, *chw)  # (T, B, C, H, W) -> (T * B, C, H, W)
         conv = self.conv(observation)
         flatten = conv.view(time, batch, -1)  # (T*B, C', H', W') -> (T, B, C' * H' * W')
+        return flatten
+
+    def _mlp_forward(self, flatten):
         f = self.fe(flatten)
-        if self.distribution in ['TanhNormal', 'Normal']:
-            mean = self.policy(f)
-            log_std = self.actor_log_std.expand_as(mean)
-            policy = torch.cat((mean, log_std), -1)
-        else:
-            policy = self.policy(f)
+        # if self.distribution in ['TanhNormal', 'Normal']:
+        #     mean = self.policy(f)
+        #     log_std = self.actor_log_std.expand_as(mean)
+        #     policy = torch.cat((mean, log_std), -1)
+        # else:
+        policy = self.policy(f)
         value = self.value(f).squeeze(-1)
+        return policy, value
+
+    def forward(self, observation):
+        flatten = self._cnn_forward(observation)
+        policy, value = self._mlp_forward(flatten)
         return policy, value
 
 
@@ -130,3 +136,24 @@ class ModelMLP(nn.Module):
         x = torch.cat((observation, action), dim=-1)
         x = self.fe(x)
         return self.last_layer(x)
+
+
+class RolloutDiscriminator(nn.Module):
+    # predicts p(rollout ~ pi_expert)
+    def __init__(
+            self,
+            observation_size, hidden_size
+    ):
+        super().__init__()
+        self.linear_1 = nn.Sequential(
+            nn.Linear(observation_size, hidden_size), nn.Tanh()
+        )
+        self.lstm = nn.LSTM(hidden_size, hidden_size)
+        self.linear_2 = nn.Linear(hidden_size, 1)
+
+    def forward(self, observations):
+        # observations is of size (T, B, dim(obs))
+        x = self.linear_1(observations)
+        x, _ = self.lstm(x)
+        log_p_pi_expert = self.linear_2(x[-1])
+        return log_p_pi_expert

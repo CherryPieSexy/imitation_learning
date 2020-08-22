@@ -24,12 +24,13 @@ class Categorical(Distribution):
 
     def sample(self, parameters, deterministic):
         logits = parameters
+        distribution = self.dist_fn(logits=logits)
         if deterministic:
             sample = logits.argmax(dim=-1)
         else:
-            distribution = self.dist_fn(logits=logits)
             sample = distribution.sample()
-        return sample
+        log_prob = distribution.log_prob(sample)
+        return sample, log_prob
 
     def log_prob(self, parameters, sample):
         logits = parameters
@@ -52,13 +53,22 @@ class GumbelSoftmax(Categorical):
 
     def sample(self, parameters, deterministic):
         logits = parameters
+        distribution = self.dist_fn(logits=logits)
         if deterministic:
             index = logits.argmax(-1, keepdim=True)
             sample = torch.zeros_like(logits)
             sample.scatter_(-1, index, 1.0)
         else:
             sample = fun.gumbel_softmax(logits, hard=True)
-        return sample
+        log_prob = distribution.log_prob(sample)
+        return sample, log_prob
+
+
+def convert_parameters_beta(parameters):
+    parameters = 1.0 + fun.softplus(parameters)
+    action_size = parameters.size(-1) // 2
+    alpha, beta = parameters.split(action_size, dim=-1)
+    return alpha, beta
 
 
 class Beta(Distribution):
@@ -66,41 +76,32 @@ class Beta(Distribution):
     # rescale actions with y = 2 * x - 1, x ~ Beta
     def __init__(self):
         self.dist_fn = dist.Beta
+        self._convert_parameters = convert_parameters_beta
 
     @staticmethod
     def _agent_to_env(action):
-        # [0, 1] -> [-1, +1]
-        action = 2.0 * action - 1.0
-        action = torch.clamp(action, -0.999, +0.999)
+        # [0, 1] -> [-1.2, +1.2]
+        action = 2.4 * action - 1.2
+        action = torch.clamp(action, -1.1999, +1.1999)
         return action
 
     @staticmethod
     def _env_to_agent(action):
-        # [-1, +1] -> [0, 1]
-        action = torch.clamp(action, -0.999, +0.999)
-        return 0.5 * (action + 1.0)
-
-    @staticmethod
-    def _convert_parameters(parameters):
-        parameters = 1.0 + fun.softplus(parameters)
-        action_size = parameters.size(-1) // 2
-        alpha, beta = parameters.split(action_size, dim=-1)
-        return alpha, beta
+        # [-1.2, +1.2] -> [0, 1]
+        action = torch.clamp(action, -1.1999, +1.1999)
+        return (action + 1.2) / 2.4
 
     def sample(self, parameters, deterministic):
         alpha, beta = self._convert_parameters(parameters)
+        distribution = self.dist_fn(alpha, beta)
         if deterministic:
-            # good solution: return median
-            # but median can be nan (if alpha == beta == 1.0)
-            mean = alpha / (alpha + beta)
-            median = (alpha - 1.0) / (alpha + beta - 2.0)
-            mask = torch.isnan(median)
-            z = torch.masked_scatter(median, mask, mean)
+            # mean works better than median in practice
+            z = alpha / (alpha + beta)
         else:
-            distribution = self.dist_fn(alpha, beta)
             z = distribution.sample()
+        log_prob = distribution.log_prob(z)
         sample = self._agent_to_env(z)
-        return sample
+        return sample, log_prob.sum(-1)
 
     def log_prob(self, parameters, sample):
         # do not use rescaling here
@@ -119,46 +120,43 @@ class Beta(Distribution):
         return entropy.sum(-1)
 
 
+def convert_parameters_normal(parameters):
+    half = parameters.size(-1) // 2
+    mean, log_sigma = parameters.split(half, -1)
+    log_sigma_clamp = torch.clamp(log_sigma, -20, +2)
+    sigma = log_sigma_clamp.exp()
+    return mean, sigma
+
+
 class TanhNormal(Distribution):
     # WARNING: for some reason, this distribution produces Nans in policy -_-
     def __init__(self):
         self.dist_fn = dist.Normal
+        self._convert_parameters = convert_parameters_normal
 
     @staticmethod
     def _agent_to_env(action):
         action = torch.tanh(action)
-        # action = torch.clamp(action, -0.999, +0.999)
         return action
 
     @staticmethod
     def _env_to_agent(action):
-        # action = torch.clamp(action, -0.999, +0.999)
+        # atanh
         # noinspection PyTypeChecker
         action = (1.0 + action) / (1.0 - action)
         action = 0.5 * torch.log(action)
         return action
 
-    @staticmethod
-    def _convert_parameters(parameters):
-        action_size = parameters.size(-1) // 2
-        mean, log_sigma = parameters.split(action_size, -1)
-        # some paper suggest to clip log_std to +-15, however I observe Nan-s with this values
-        log_sigma_clamp = torch.clamp(log_sigma, -20, +2)
-        # forward: torch.clamp(log_sigma)
-        # backward: log_sigma
-        log_sigma = log_sigma_clamp.detach() - log_sigma.detach() + log_sigma
-        sigma = log_sigma.exp()  # works MUCH better with this 0.5
-        return mean, sigma
-
     def sample(self, parameters, deterministic):
         mean, sigma = self._convert_parameters(parameters)
+        distribution = self.dist_fn(mean, sigma)
         if deterministic:
             z = mean
         else:
-            distribution = self.dist_fn(mean, sigma)
             z = distribution.sample()
+        log_prob = distribution.log_prob(z)
         sample = self._agent_to_env(z)
-        return sample
+        return sample, log_prob.sum(-1)
 
     def log_prob(self, parameters, sample):
         mean, sigma = self._convert_parameters(parameters)
@@ -174,14 +172,15 @@ class TanhNormal(Distribution):
         log_prob = distribution.log_prob(z)
 
         # noinspection PyTypeChecker
-        d_tanh_dx = math.log(4.0) - 2 * torch.log(z.exp() + (-z).exp())
-        entropy = -log_prob + d_tanh_dx
+        # d_tanh_dx = math.log(4.0) - 2 * torch.log(z.exp() + (-z).exp())
+        log_d_tanh = torch.log(1 - sample.pow(2))
+        entropy = -log_prob + log_d_tanh
+
         return entropy.sum(-1)
 
 
 class Normal(TanhNormal):
-    # same as TanhNormal, but without tanh and arc-tanh
-    # entropy is nut used inside model...
+    # same as TanhNormal, but without tanh and atanh
     @staticmethod
     def _env_to_agent(action):
         return action

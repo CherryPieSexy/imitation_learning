@@ -1,4 +1,8 @@
+from _collections import deque
+
 import gym
+import cv2
+import numpy as np
 
 
 gym.logger.set_level(40)
@@ -15,6 +19,7 @@ class ContinuousActionWrapper(gym.Wrapper):
 
     def step(self, action):
         # noinspection PyTypeChecker
+        action = np.clip(action, -1.0, +1.0)
         env_action = self.a * action + self.b
         return self.env.step(env_action)
 
@@ -36,12 +41,118 @@ class ActionRepeatWrapper(gym.Wrapper):
         super().__init__(env)
         self.action_repeat = action_repeat
 
-    def step(self, action):
+    def step(self, action, render=False):
         reward = 0.0
         for _ in range(self.action_repeat):
             obs, r, done, info = self.env.step(action)
+            if render:
+                self.env.render()
             reward += r
             if done:
                 break
         # noinspection PyUnboundLocalVariable
         return obs, reward, done, info
+
+
+class DiePenaltyWrapper(gym.Wrapper):
+    def __init__(self, env, max_episode_steps, penalty=-100):
+        super().__init__(env)
+        self._penalty = penalty
+        self._elapsed_steps = 0
+        self._max_episode_steps = max_episode_steps
+
+    def reset(self):
+        self._elapsed_steps = 0
+        return self.env.reset()
+
+    def step(self, action, **kwargs):
+        observation, reward, done, info = self.env.step(action, **kwargs)
+        self._elapsed_steps += 1
+        timed_out = self._max_episode_steps == self._elapsed_steps
+        if done and not timed_out:
+            reward += self._penalty
+        if timed_out:
+            done = True
+        return observation, reward, done, info
+
+
+class ImgToGrayWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+    @staticmethod
+    def _img_2_gray(img):
+        img = np.dot(img[..., :], [0.299, 0.587, 0.114])
+        img = img / 128.0 - 1
+        return img
+
+    def reset(self):
+        observation = self.env.reset()
+        observation = self._img_2_gray(observation)
+        return observation
+
+    def step(self, action, **kwargs):
+        observation, reward, done, info = self.env.step(action, **kwargs)
+        observation = self._img_2_gray(observation)
+        return observation, reward, done, info
+
+
+class ImageEnvWrapper(gym.Wrapper):
+    # crop and resize
+    def __init__(
+            self, env,
+            convert_to_gray,
+            x_start, x_end, y_start, y_end,
+            x_size, y_size
+    ):
+        super().__init__(env)
+        self.convert_to_gray = convert_to_gray
+        self.x_start = x_start
+        self.x_end = x_end
+        self.y_start = y_start
+        self.y_end = y_end
+        self.x_size = x_size
+        self.y_size = y_size
+
+    @staticmethod
+    def _img_2_gray(img):
+        img = np.dot(img[..., :], [0.299, 0.587, 0.114])
+        img = img / 128.0 - 1
+        return img
+
+    def _process_img(self, img):
+        img = img[self.x_start:self.x_end, self.y_start:self.y_end]
+        if self.convert_to_gray:
+            img = self._img_2_gray(img)
+        img = cv2.resize(img, (self.x_size, self.y_size))
+        return img
+
+    def reset(self):
+        obs = self.env.reset()
+        obs = self._process_img(obs)
+        return obs
+
+    def step(self, action, **kwargs):
+        observation, reward, done, info = self.env.step(action, **kwargs)
+        observation = self._process_img(observation)
+        return observation, reward, done, info
+
+
+class FrameStackWrapper(gym.Wrapper):
+    def __init__(self, env, n_stack):
+        super().__init__(env)
+        self.n_stack = n_stack
+        self.stack = None
+
+    def reset(self):
+        obs = self.env.reset()
+        self.stack = deque([obs] * self.n_stack)
+        observation = np.copy(self.stack)
+        return observation
+
+    def step(self, action, **kwargs):
+        observation, reward, done, info = self.env.step(action, **kwargs)
+        self.stack.popleft()
+        self.stack.append(observation)
+        observation = np.copy(self.stack)
+        return observation, reward, done, info

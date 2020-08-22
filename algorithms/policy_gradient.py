@@ -3,12 +3,15 @@ import numpy as np
 import torch
 from torch.nn.utils import clip_grad_norm_
 
+from utils.utils import time_it
+from utils.batch_crop import batch_crop
+from algorithms.kl_divergence import kl_divergence
 from algorithms.distributions import distributions_dict
-from algorithms.nn import ActorCriticTwoMLP, ActorCriticAtari
+from algorithms.nn import ActorCriticTwoMLP, ActorCriticCNN
 from algorithms.normalization import RunningMeanStd
 
 
-class PolicyGradientInference:
+class AgentInference:
     def __init__(
             self,
             image_env,
@@ -19,7 +22,7 @@ class PolicyGradientInference:
         self.distribution = distributions_dict[distribution]()
 
         if image_env:
-            self.nn = ActorCriticAtari(action_size, distribution)
+            self.nn = ActorCriticCNN(action_size, distribution)
         else:
             self.nn = ActorCriticTwoMLP(
                 observation_size, action_size, hidden_size, distribution
@@ -28,6 +31,9 @@ class PolicyGradientInference:
         self.nn.to(device)
         self.obs_normalizer = None
 
+    def load_state_dict(self, state):
+        self.nn.load_state_dict(state['nn'])
+
     def load(self, filename):
         checkpoint = torch.load(filename)
         self.nn.load_state_dict(checkpoint['agent']['nn'])
@@ -35,12 +41,16 @@ class PolicyGradientInference:
             self.obs_normalizer = RunningMeanStd()
             self.obs_normalizer.load_state_dict(checkpoint['obs_normalizer'])
 
+    def train(self):
+        self.nn.train()
+
     def eval(self):
         self.nn.eval()
 
-    def act(self, observations, deterministic=False):
+    def act(self, observations, return_pi=False, deterministic=False):
         """
         :param observations: np.array of observation, shape = [T, B, dim(obs)]
+        :param return_pi: True or False. If True then method return full pi, not just log(pi(a))
         :param deterministic: True or False
         :return: action, np.array of shape = [T, B, dim(action)]
         """
@@ -49,9 +59,11 @@ class PolicyGradientInference:
             observations = (observations - mean) / np.sqrt(var + 1e-8)
         with torch.no_grad():
             policy, _ = self.nn(torch.tensor(observations, dtype=torch.float32, device=self.device))
-        action = self.distribution.sample(policy, deterministic)
-        action = action.cpu().numpy()
-        return action
+        action, log_prob = self.distribution.sample(policy, deterministic)
+        if return_pi:
+            return action, policy
+        else:
+            return action, log_prob
 
 
 class PolicyGradient:
@@ -61,19 +73,22 @@ class PolicyGradient:
             observation_size, action_size, hidden_size, device,
             distribution, normalize_adv, returns_estimator,
             lr, gamma, entropy, clip_grad,
-            gae_lambda=0.95
+            gae_lambda=0.95, image_augmentation_alpha=0.0
     ):
         """
         :param image_env:
         :param observation_size, action_size, hidden_size, device: just nn parameters
-        :param distribution: 'Categorical' or 'NormalFixed' or 'Beta'
+        :param distribution: any from 'distributions.py' file
         :param normalize_adv: True or False
         :param returns_estimator: '1-step', 'n-step', 'gae'
         :param lr, gamma, entropy, clip_grad: learning hyper-parameters
         :param gae_lambda: gae lambda, optional
+        :param image_augmentation_alpha: if > 0 then additional
+                                         alpha * D_KL(pi, pi_aug) loss term will be used
         """
         self.device = device
 
+        self.distribution_str = distribution
         self.distribution = distributions_dict[distribution]()
 
         # policy, value = nn(obs)
@@ -81,7 +96,7 @@ class PolicyGradient:
         # value.size() == (T, B)  - there is no '1' at the last dimension!
 
         if image_env:
-            self.nn = ActorCriticAtari(action_size, distribution)
+            self.nn = ActorCriticCNN(action_size, distribution)
         else:
             self.nn = ActorCriticTwoMLP(
                 observation_size, action_size, hidden_size, distribution
@@ -97,6 +112,7 @@ class PolicyGradient:
         self.gamma = gamma
         self.entropy = entropy
         self.clip_grad = clip_grad
+        self.image_augmentation_alpha = image_augmentation_alpha
 
     def state_dict(self):
         state_dict = {
@@ -128,8 +144,8 @@ class PolicyGradient:
 
     def load(self, filename):
         checkpoint = torch.load(filename)
-        self.nn.load_state_dict(checkpoint['nn'])
-        self.opt.load_state_dict(checkpoint['opt'])
+        self.nn.load_state_dict(checkpoint['agent']['nn'])
+        self.opt.load_state_dict(checkpoint['agent']['opt'])
 
     def train(self):
         self.training = True
@@ -139,18 +155,22 @@ class PolicyGradient:
         self.training = False
         self.nn.eval()
 
-    def act(self, observations, deterministic=False):
+    def act(self, observations, return_pi=False, deterministic=False):
         """
         :param observations: np.array of observation, shape = [T, B, dim(obs)]
+        :param return_pi: True or False. If True then method return full pi, not just log(pi(a))
         :param deterministic: True or False
         :return: action, torch.Tensor of shape = [T, B, dim(action)], with gradients
         """
         policy, _ = self.nn(
             torch.tensor(observations, dtype=torch.float32, device=self.device)
         )
-        action = self.distribution.sample(policy, deterministic)
+        action, log_prob = self.distribution.sample(policy, deterministic)
         # we can not use 'action.cpu().numpy()' here, because we want action to have gradient
-        return action
+        if return_pi:
+            return action, policy
+        else:
+            return action, log_prob
 
     def _one_step_returns(self, next_values, rewards, not_done):
         returns = rewards + self.gamma * not_done * next_values
@@ -218,13 +238,31 @@ class PolicyGradient:
             advantage = self._normalize_advantages(advantage)
         return policy, value, returns, advantage
 
+    def to_tensor(self, x):
+        return torch.tensor(x, dtype=torch.float32, device=self.device)
+
     def _rollout_to_tensors(self, rollout):
-        def to_tensor(x):
-            return torch.tensor(x, dtype=torch.float32, device=self.device)
-
-        observations, actions, rewards, is_done = list(map(to_tensor, rollout))
+        observations, actions, rewards, is_done, policy_old = list(map(self.to_tensor, rollout))
         not_done = 1.0 - is_done
-        return observations, actions, rewards, not_done
+        return observations, actions, rewards, not_done, policy_old
 
-    def train_on_rollout(self, *args, **kwargs):
+    def _train_fn(self, rollout):
         raise NotImplementedError
+
+    @time_it
+    def _augmentation_loss(self, policy, value, observations):
+        observations_aug = batch_crop(observations)
+        policy_aug, value_aug = self.nn(observations_aug)
+        policy_div = kl_divergence(self.distribution_str, policy, policy_aug).mean()
+        value_div = 0.5 * ((value - value_aug) ** 2).mean()
+        return policy_div, value_div
+
+    def train_on_rollout(self, rollout):
+        train_fn_result, train_fn_time = time_it(self._train_fn)(rollout)
+        if isinstance(train_fn_result, tuple):
+            result_log, time_log = train_fn_result
+        else:  # i.e. result is one dict
+            result_log = train_fn_result
+            time_log = dict()
+        time_log['train_on_rollout'] = train_fn_time
+        return result_log, time_log
