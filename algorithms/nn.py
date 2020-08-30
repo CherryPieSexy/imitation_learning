@@ -52,6 +52,7 @@ class ActorCriticTwoMLP(nn.Module):
             policy = torch.cat((mean, log_std), -1)
         else:
             policy = self.policy(observation)
+        value = self.critic(observation).squeeze(-1)
 
         return policy, value
 
@@ -92,7 +93,10 @@ class ActorCriticCNN(nn.Module):
         return flatten
 
     def _mlp_forward(self, flatten):
-        f = self.fe(flatten)
+        if self.fe is not None:
+            f = self.fe(flatten)
+        else:
+            f = flatten
         # if self.distribution in ['TanhNormal', 'Normal']:
         #     mean = self.policy(f)
         #     log_std = self.actor_log_std.expand_as(mean)
@@ -106,6 +110,33 @@ class ActorCriticCNN(nn.Module):
         flatten = self._cnn_forward(observation)
         policy, value = self._mlp_forward(flatten)
         return policy, value
+
+
+class ActorCriticDeepCNN(ActorCriticCNN):
+    def __init__(self, action_size, distribution):
+        super().__init__(action_size, distribution)
+        gain = nn.init.calculate_gain('relu')
+        gain_policy = 0.01
+
+        self.conv = nn.Sequential(  # input shape (4, 96, 96)
+            init(nn.Conv2d(4, 8, kernel_size=4, stride=2), gain=gain), nn.ELU(),
+            init(nn.Conv2d(8, 16, kernel_size=3, stride=2), gain=gain), nn.ELU(),
+            init(nn.Conv2d(16, 32, kernel_size=3, stride=2), gain=gain), nn.ELU(),
+            init(nn.Conv2d(32, 64, kernel_size=3, stride=2), gain=gain), nn.ELU(),
+            init(nn.Conv2d(64, 128, kernel_size=3, stride=1), gain=gain), nn.ELU(),
+            init(nn.Conv2d(128, 256, kernel_size=3, stride=1), gain=gain), nn.ELU()
+        )  # output shape (256, 1, 1)
+        self.fe = None
+        self.value = nn.Sequential(
+            init(nn.Linear(256, 100), gain=gain), nn.ELU(),
+            init(nn.Linear(100, 1))
+        )
+        if distribution in ['Beta', 'TanhNormal', 'Normal']:
+            action_size *= 2
+        self.policy = nn.Sequential(
+            init(nn.Linear(256, 100), gain=gain), nn.ELU(),
+            init(nn.Linear(100, action_size), gain=gain_policy)
+        )
 
 
 class ModelMLP(nn.Module):
