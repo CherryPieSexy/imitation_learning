@@ -126,7 +126,7 @@ class ActorCriticDeepCNN(ActorCriticCNN):
             init(nn.Conv2d(64, 128, kernel_size=3, stride=1), gain=gain), nn.ELU(),
             init(nn.Conv2d(128, 256, kernel_size=3, stride=1), gain=gain), nn.ELU()
         )  # output shape (256, 1, 1)
-        self.fe = None
+        self.fe = nn.Dropout(0.2)
         self.value = nn.Sequential(
             init(nn.Linear(256, 100), gain=gain), nn.ELU(),
             init(nn.Linear(100, 1))

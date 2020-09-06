@@ -1,29 +1,45 @@
 import numpy as np
 import torch
 from tqdm import trange
-from tensorboardX import SummaryWriter
 
 
 from utils.utils import time_it
 from algorithms.normalization import RunningMeanStd
+from trainers.base_trainer import BaseTrainer
 
 
 # TODO: add logging here
-class OnPolicyTrainer:
-    """
-    Simple on-policy trainer.
-    """
+class OnPolicyTrainer(BaseTrainer):
     def __init__(
             self,
             agent_online, agent_train,
             update_period, return_pi,
-            train_env, test_env,
-            normalize_obs, normalize_reward,
+            train_env,
+            normalize_obs, scale_reward, normalize_reward,
             obs_clip, reward_clip,
-            log_dir
+            **kwargs
     ):
+        """On-policy trainer
+
+        :param agent_online:
+        :param agent_train:
+        :param update_period:
+        :param return_pi:
+        :param train_env:
+        :param test_env:
+        :param normalize_obs:
+        :param scale_reward:
+        :param normalize_reward:
+        :param obs_clip:
+        :param reward_clip:
+        :param log_dir:
+        :param kwargs: test_env and log_dir
+        """
+        super().__init__(**kwargs)
+
         self._agent_online = agent_online  # gather rollouts
         self._agent_train = agent_train  # do train-ops
+        self._update_online_agent()
         # weights of online agent updated once in 'update_period' & at the end of training epoch
         self._update_period = update_period
 
@@ -34,11 +50,13 @@ class OnPolicyTrainer:
         #   vectorized
         #   reset environment automatically
         self._train_env = train_env
-        self._test_env = test_env
 
         # normalizers:
         self._obs_normalizer = RunningMeanStd() if normalize_obs else None
         self._obs_clip = obs_clip
+        assert not (normalize_reward and scale_reward), \
+            'reward may be normalized or scaled, but not both at the same time!'
+        # TODO: use scaling here...
         self._reward_normalizer = RunningMeanStd() if normalize_reward else None
         self._reward_clip = reward_clip
 
@@ -48,10 +66,6 @@ class OnPolicyTrainer:
         self._env_episode_len = np.zeros(train_env.num_envs, dtype=np.int32)
         self._env_return = np.zeros(train_env.num_envs, dtype=np.float32)
         self._env_episode = np.zeros(train_env.num_envs, dtype=np.int32)
-
-        self._log_dir = log_dir
-
-        self._writer = SummaryWriter(log_dir + 'tb_logs/')
 
     def save(self, filename):
         state_dict = {'agent': self._agent_train.state_dict()}
@@ -81,12 +95,25 @@ class OnPolicyTrainer:
             stacked_info[key] = np.stack(values)
         return stacked_info
 
-    @time_it
-    def _act(self, observation, deterministic):
-        # add and remove time dimension into observation
-        with torch.no_grad():
-            action, log_prob = self._agent_online.act([observation], self._return_pi, deterministic)
-        return action.cpu().numpy()[0], log_prob.cpu().numpy()
+    # def _act(self, fake_agent, observation, deterministic, training=False, **kwargs):
+    #     # 'fake_agent' arg is unused to make this method work in BaseTrainer.test_agent_service
+    #     observation = self._normalize_observation(observation, training)
+    #     (action, log_prob), act_time = super()._act(
+    #         self._agent_online, observation, deterministic,
+    #         return_pi=self._return_pi
+    #     )
+    #     return (action, log_prob), act_time
+
+    def _act(self, fake_agent, observation, deterministic, need_norm=True, **kwargs):
+        # this method used ONLY inside base class '._test_agent_service()' method
+        # 'fake_agent' arg is unused to make this method work in BaseTrainer.test_agent_service
+        if need_norm:
+            observation = self._normalize_observation(observation, False)
+        (action, log_prob), act_time = super()._act(
+            self._agent_online, observation, deterministic,
+            return_pi=self._return_pi
+        )
+        return (action, log_prob), act_time
 
     def _normalize_observation(self, observation, training):
         if self._obs_normalizer is not None:
@@ -114,18 +141,13 @@ class OnPolicyTrainer:
             reward = np.clip(reward, -self._reward_clip, self._reward_clip)
         return reward
 
-    @staticmethod
-    @time_it
-    def env_step(env, action):
-        return env.step(action)
-
     @time_it
     def _gather_rollout(self, observation, rollout_len):
         # this function only called when agent is trained
         # initial observation (i.e. at the beginning of training) does not care about normalization
         observations, actions, rewards, is_done = [observation], [], [], []
         log_probs = []
-        raw_observations, raw_rewards = [observation], []
+        raw_rewards = []
 
         mean_act_time = 0
         mean_env_time = 0
@@ -133,10 +155,10 @@ class OnPolicyTrainer:
         for _ in range(rollout_len):
             # on-policy trainer does not requires actions to be differentiable
             # however, agent may be used by different algorithms which may require that
-            (action, log_prob), act_time = self._act(observation, deterministic=False)
+            (action, log_prob), act_time = self._act(None, observation, deterministic=False, need_norm=False)
             mean_act_time += act_time
 
-            env_step_result, env_time = self.env_step(self._train_env, action)
+            env_step_result, env_time = self._env_step(self._train_env, action)
             observation, reward, done, _ = env_step_result
             mean_env_time += env_time
 
@@ -144,11 +166,10 @@ class OnPolicyTrainer:
             self._env_episode_len += 1
             self._env_return = reward + self._gamma * self._env_return
 
-            raw_observations.append(np.copy(observation))
             raw_rewards.append(np.copy(reward))
 
             observation = self._normalize_observation(observation, training=True)
-            reward = self._normalize_reward(reward, True)
+            reward = self._normalize_reward(reward, training=True)
 
             observations.append(observation)
             actions.append(action)
@@ -162,7 +183,7 @@ class OnPolicyTrainer:
         mean_env_time /= rollout_len
 
         rollout = observations, actions, rewards, is_done, log_probs
-        gather_result = rollout, raw_observations, raw_rewards, observation
+        gather_result = rollout, raw_rewards, observation
         mean_time = mean_act_time, mean_env_time
         return gather_result, mean_time
 
@@ -185,15 +206,11 @@ class OnPolicyTrainer:
                     self._env_return[i] = 0.0
                     self._env_episode[i] += 1
 
-    def _write_logs(self, tag, values, step):
-        for key, value in values.items():
-            self._writer.add_scalar(tag + key, value, step)
-
     def _train_step(self, observation, rollout_len, step):
         # gather rollout -> train on it -> write training logs
         (gather_result, mean_time), gather_time = self._gather_rollout(observation, rollout_len)
 
-        rollout, raw_observations, raw_rewards, observation = gather_result
+        rollout, raw_rewards, observation = gather_result
         mean_act_time, mean_env_time = mean_time
 
         train_logs, time_logs = self._agent_train.train_on_rollout(rollout)
@@ -207,42 +224,6 @@ class OnPolicyTrainer:
         self._write_logs('train/', train_logs, step)
         self._write_logs('time/', time_logs, step)
         return observation
-
-    @time_it
-    def _test_agent_service(self, n_tests):
-        # do the job
-        self._agent_online.eval()
-        n_test_envs = self._test_env.num_envs
-        observation = self._test_env.reset()
-        env_reward = np.zeros(n_test_envs, dtype=np.float32)
-        episode_rewards = []
-
-        while len(episode_rewards) < n_tests:
-            observation = self._normalize_observation(observation, training=False)
-            # I do not care about time while testing
-            (action, _), _ = self._act(observation, deterministic=True)
-            env_step_result, _ = self.env_step(self._test_env, action)
-            observation, reward, done, _ = env_step_result
-            env_reward += reward
-            if np.any(done):
-                for i, d in enumerate(done):
-                    if d:
-                        episode_rewards.append(env_reward[i])
-                        env_reward[i] = 0.0
-
-        reward_mean = np.mean(episode_rewards)
-        reward_std = np.std(episode_rewards)
-        test_result = {
-            'reward_mean': reward_mean,
-            'reward_std': reward_std
-        }
-        return test_result
-
-    def _test_agent(self, step, n_tests):
-        # call the testing function and write logs
-        test_result, test_time = self._test_agent_service(n_tests)
-        test_result['test_time'] = test_time
-        self._write_logs('test/', test_result, step)
 
     def _update_online_agent(self):
         self._agent_online.load_state_dict(self._agent_train.state_dict())
@@ -260,7 +241,7 @@ class OnPolicyTrainer:
         :return:
         """
         observation = self._train_env.reset()
-        self._test_agent(0, n_tests)
+        self._test_agent(0, n_tests, self._agent_online)
 
         self._agent_train.train()  # always in training mode
         for epoch in range(n_epoch):
@@ -276,6 +257,5 @@ class OnPolicyTrainer:
             self._update_online_agent()
             checkpoint_name = self._log_dir + 'checkpoints/' + f'epoch_{epoch}.pth'
             self.save(checkpoint_name)
-            self._agent_online.eval()
-            self._test_agent(epoch + 1, n_tests)
+            self._test_agent(epoch + 1, n_tests, self._agent_online)
         self._writer.close()

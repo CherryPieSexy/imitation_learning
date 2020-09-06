@@ -7,6 +7,14 @@ from algorithms.policy_gradient import PolicyGradient
 
 
 class BehaviorCloning(PolicyGradient):
+    def __init__(self, *args, loss_type='mse', **kwargs):
+        assert loss_type in ['mse', 'likelihood']
+        if loss_type == 'mse':
+            self._loss_fn = self._mean_loss
+        else:
+            self._loss_fn = self._log_prob_loss
+        super().__init__(*args, **kwargs)
+
     def to_tensor(self, x):
         return x.to(torch.float32).to(self.device)
 
@@ -28,8 +36,7 @@ class BehaviorCloning(PolicyGradient):
 
         policy, _ = self.nn(observations)
 
-        # loss = self._mean_loss(policy, actions).mean()
-        loss = self._log_prob_loss(policy, actions).mean()
+        loss = self._loss_fn(policy, actions).mean()
 
         grad_norm = self._optimize_loss(loss)
         result = {

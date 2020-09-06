@@ -80,16 +80,17 @@ class Beta(Distribution):
 
     @staticmethod
     def _agent_to_env(action):
-        # [0, 1] -> [-1.2, +1.2]
-        action = 2.4 * action - 1.2
-        action = torch.clamp(action, -1.1999, +1.1999)
+        # [0, 1] -> [-1.0, +1.0]
+        action = 2.0 * action - 1.0
+        action = torch.clamp(action, -0.9999, +0.9999)
         return action
 
     @staticmethod
     def _env_to_agent(action):
-        # [-1.2, +1.2] -> [0, 1]
-        action = torch.clamp(action, -1.1999, +1.1999)
-        return (action + 1.2) / 2.4
+        # [-1.0, +1.0] -> [0, 1]
+        action = torch.clamp(action, -0.9999, +0.9999)
+        action = (action + 1.0) / 2.0
+        return action
 
     def sample(self, parameters, deterministic):
         alpha, beta = self._convert_parameters(parameters)
@@ -120,6 +121,22 @@ class Beta(Distribution):
         return entropy.sum(-1)
 
 
+class WideBeta(Beta):
+    @staticmethod
+    def _agent_to_env(action):
+        # [0, 1] -> [-1.2, +1.2]
+        action = 2.4 * action - 1.2
+        action = torch.clamp(action, -1.1999, +1.1999)
+        return action
+
+    @staticmethod
+    def _env_to_agent(action):
+        # [-1.2, +1.2] -> [0, 1]
+        action = torch.clamp(action, -1.1999, +1.1999)
+        action = (action + 1.2) / 2.4
+        return action
+
+
 def convert_parameters_normal(parameters):
     half = parameters.size(-1) // 2
     mean, log_sigma = parameters.split(half, -1)
@@ -137,11 +154,13 @@ class TanhNormal(Distribution):
     @staticmethod
     def _agent_to_env(action):
         action = torch.tanh(action)
+        action = torch.clamp(action, -0.9999, +0.9999)
         return action
 
     @staticmethod
     def _env_to_agent(action):
         # atanh
+        action = torch.clamp(action, -0.9999, +0.9999)
         # noinspection PyTypeChecker
         action = (1.0 + action) / (1.0 - action)
         action = 0.5 * torch.log(action)
@@ -200,6 +219,7 @@ distributions_dict = {
     'Categorical': Categorical,
     'GumbelSoftmax': GumbelSoftmax,
     'Beta': Beta,
+    'WideBeta': WideBeta,
     'TanhNormal': TanhNormal,
     'Normal': Normal
 }

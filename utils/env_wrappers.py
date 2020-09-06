@@ -55,24 +55,15 @@ class ActionRepeatWrapper(gym.Wrapper):
 
 
 class DiePenaltyWrapper(gym.Wrapper):
-    def __init__(self, env, max_episode_steps, penalty=-100):
+    def __init__(self, env, penalty=-100):
         super().__init__(env)
         self._penalty = penalty
-        self._elapsed_steps = 0
-        self._max_episode_steps = max_episode_steps
-
-    def reset(self):
-        self._elapsed_steps = 0
-        return self.env.reset()
 
     def step(self, action, **kwargs):
         observation, reward, done, info = self.env.step(action, **kwargs)
-        self._elapsed_steps += 1
-        timed_out = self._max_episode_steps == self._elapsed_steps
-        if done and not timed_out:
-            reward += self._penalty
-        if timed_out:
-            done = True
+        if done:
+            if info.get('TimeLimit.truncated', None) is None:
+                reward += self._penalty
         return observation, reward, done, info
 
 
@@ -156,3 +147,14 @@ class FrameStackWrapper(gym.Wrapper):
         self.stack.append(observation)
         observation = np.copy(self.stack)
         return observation, reward, done, info
+
+
+class StateLoadWrapper(gym.Wrapper):
+    # works for mujoco environments
+    def __init__(self, env, obs_to_state_fn):
+        super().__init__(env)
+        self.obs_to_env_fn = obs_to_state_fn
+
+    def load_state(self, obs):
+        state = self.obs_to_env_fn(obs)
+        self.env.set_state(**state)

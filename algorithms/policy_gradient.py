@@ -1,4 +1,4 @@
-# base class for policy gradient algorithms (A2C and PPO)
+# base class for policy gradient algorithms
 import numpy as np
 import torch
 from torch.nn.utils import clip_grad_norm_
@@ -7,29 +7,22 @@ from utils.utils import time_it
 from utils.batch_crop import batch_crop
 from algorithms.kl_divergence import kl_divergence
 from algorithms.distributions import distributions_dict
-from algorithms.nn import ActorCriticTwoMLP, ActorCriticCNN
 from algorithms.normalization import RunningMeanStd
 
 
 class AgentInference:
     def __init__(
             self,
-            image_env,
-            observation_size, action_size, hidden_size, device,
-            distribution
+            nn, device,
+            distribution,
+            testing=False
     ):
+        self.nn = nn
         self.device = device
-        self.distribution = distributions_dict[distribution]()
-
-        if image_env:
-            self.nn = ActorCriticCNN(action_size, distribution)
-        else:
-            self.nn = ActorCriticTwoMLP(
-                observation_size, action_size, hidden_size, distribution
-            )
-
         self.nn.to(device)
+        self.distribution = distributions_dict[distribution]()
         self.obs_normalizer = None
+        self.testing = testing
 
     def load_state_dict(self, state):
         self.nn.load_state_dict(state['nn'])
@@ -47,13 +40,7 @@ class AgentInference:
     def eval(self):
         self.nn.eval()
 
-    def act(self, observations, return_pi=False, deterministic=False):
-        """
-        :param observations: np.array of observation, shape = [T, B, dim(obs)]
-        :param return_pi: True or False. If True then method return full pi, not just log(pi(a))
-        :param deterministic: True or False
-        :return: action, np.array of shape = [T, B, dim(action)]
-        """
+    def _act(self, observations, return_pi, deterministic):
         if self.obs_normalizer is not None:
             mean, var = self.obs_normalizer.mean, self.obs_normalizer.var
             observations = (observations - mean) / np.sqrt(var + 1e-8)
@@ -65,20 +52,33 @@ class AgentInference:
         else:
             return action, log_prob
 
+    def act(self, observations, return_pi=False, deterministic=False):
+        """
+        :param observations: np.array of observation, shape = [T, B, dim(obs)]
+        :param return_pi: True or False. If True then method return full pi, not just log(pi(a))
+        :param deterministic: True or False
+        :return: action and log_prob during data gathering for training, just action during testing
+        """
+        if self.testing:
+            observations = [[observations]]
+        action, log_prob = self._act(observations, return_pi, deterministic)
+        if self.testing:
+            return action.cpu().numpy()[0, 0]
+        return action, log_prob
+
 
 class PolicyGradient:
     def __init__(
             self,
-            image_env,
-            observation_size, action_size, hidden_size, device,
+            nn, device,
             distribution, normalize_adv, returns_estimator,
             lr, gamma, entropy, clip_grad,
             gae_lambda=0.95, image_augmentation_alpha=0.0
     ):
         """
-        :param image_env:
-        :param observation_size, action_size, hidden_size, device: just nn parameters
-        :param distribution: any from 'distributions.py' file
+        :param nn: neural network, policy, value = nn(obs)
+               policy.size() == (T, B, dim(A) or 2 * dim(A))
+               value.size() == (T, B)  - there is no '1' at the last dimension!
         :param normalize_adv: True or False
         :param returns_estimator: '1-step', 'n-step', 'gae'
         :param lr, gamma, entropy, clip_grad: learning hyper-parameters
@@ -86,25 +86,14 @@ class PolicyGradient:
         :param image_augmentation_alpha: if > 0 then additional
                                          alpha * D_KL(pi, pi_aug) loss term will be used
         """
+        self.nn = nn
         self.device = device
 
         self.distribution_str = distribution
         self.distribution = distributions_dict[distribution]()
 
-        # policy, value = nn(obs)
-        # policy.size() == (T, B, dim(A) or 2 * dim(A))
-        # value.size() == (T, B)  - there is no '1' at the last dimension!
-
-        if image_env:
-            self.nn = ActorCriticCNN(action_size, distribution)
-        else:
-            self.nn = ActorCriticTwoMLP(
-                observation_size, action_size, hidden_size, distribution
-            )
-
         self.nn.to(device)
         self.opt = torch.optim.Adam(self.nn.parameters(), lr)
-        self.training = True
 
         self.normalize_adv = normalize_adv
         self.returns_estimator = returns_estimator
@@ -148,11 +137,9 @@ class PolicyGradient:
         self.opt.load_state_dict(checkpoint['agent']['opt'])
 
     def train(self):
-        self.training = True
         self.nn.train()
 
     def eval(self):
-        self.training = False
         self.nn.eval()
 
     def act(self, observations, return_pi=False, deterministic=False):
@@ -160,7 +147,7 @@ class PolicyGradient:
         :param observations: np.array of observation, shape = [T, B, dim(obs)]
         :param return_pi: True or False. If True then method return full pi, not just log(pi(a))
         :param deterministic: True or False
-        :return: action, torch.Tensor of shape = [T, B, dim(action)], with gradients
+        :return: action and log_prob, both torch.Tensor with shape = [T, B, ...], with gradients
         """
         policy, _ = self.nn(
             torch.tensor(observations, dtype=torch.float32, device=self.device)

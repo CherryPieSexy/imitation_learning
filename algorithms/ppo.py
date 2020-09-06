@@ -213,11 +213,10 @@ class PPO(PolicyGradient):
         np.random.shuffle(flatten_indices)
 
         num_batches = self.ppo_n_mini_batches
-        # n_batch_train = number of elements to train-on, i.e. batch-size
-        n_batch_train = n_transitions // num_batches
+        batch_size = n_transitions // num_batches
 
-        for step, start_id in enumerate(range(0, n_transitions, n_batch_train)):
-            indices_to_train_on = flatten_indices[start_id:start_id + n_batch_train]
+        for step, start_id in enumerate(range(0, n_transitions, batch_size)):
+            indices_to_train_on = flatten_indices[start_id:start_id + batch_size]
             row = indices_to_train_on // batch
             col = indices_to_train_on - batch * row
 
@@ -245,7 +244,6 @@ class PPO(PolicyGradient):
         """
         # 'done' converts into 'not_done' inside '_rollout_to_tensors' method
         observations, actions, rewards, not_done, policy_old = self._rollout_to_tensors(rollout)
-        policy_old = policy_old.squeeze(1)
         time, batch = actions.size()[:2]
         rollout_t = (observations, actions, rewards, not_done)
 
