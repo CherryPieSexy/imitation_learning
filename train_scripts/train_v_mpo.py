@@ -5,7 +5,7 @@ import torch
 import argparse
 
 from algorithms.policy_gradient import AgentInference
-from algorithms.v_mpo import VMPO
+from algorithms.agents.v_mpo import VMPO
 from utils.init_env import init_env
 from trainers.on_policy import OnPolicyTrainer
 

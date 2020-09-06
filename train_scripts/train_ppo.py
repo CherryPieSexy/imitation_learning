@@ -5,7 +5,7 @@ from utils.init_env import init_env
 from utils.utils import create_log_dir
 from algorithms.nn import ActorCriticTwoMLP, ActorCriticCNN, ActorCriticDeepCNN
 from algorithms.policy_gradient import AgentInference
-from algorithms.ppo import PPO
+from algorithms.agents.ppo import PPO
 from trainers.on_policy import OnPolicyTrainer
 
 

@@ -53,7 +53,8 @@ As for Imitation Learning algorithms, there is only Behavior Cloning for now, bu
     ├── experts           # checkpoints of trained models, just some *.pth files with nn model description and weights inside
     ├── train_scripts
         ├── train_ppo.py  # script for trainging PPO algorithm
-        └── ...           # sh scripts (configs) to train an algorithm.
+        ├── ...           # training scripts for different algorithms
+        └── configs       # sh scripts (configs) to train an algorithm.
     ├── trainers          # implementation of trainers for different algo. Trainer is a manager that controls data-collection, model optimization and testing, etc.
     ├── utils             # all other 'support' functions that does not fit in any other folder.
 
@@ -101,13 +102,13 @@ BipedalWalker-v3: mean reward ~333, 0 fails over 1000 episodes (config will be a
 
 ![bipedal](./gifs/bipedal.gif)
 
-Humanoid-v3: mean reward ~11.3k, 14 fails over 1000 episodes, [config](./train_scripts/ppo_humanoid.sh)
+Humanoid-v3: mean reward ~11.3k, 14 fails over 1000 episodes, [config](train_scripts/configs/ppo_humanoid.sh)
 
 ![humanoid](./gifs/humanoid.gif)
 
 CarRacing-v0: mean reward = 894 ± 32, 26 fails over 100 episodes 
 (episode is considered failed if reward < 900), 
-[config](./train_scripts/ppo_carracing.sh) 
+[config](train_scripts/configs/ppo_carracing.sh) 
 
 ![carracing](./gifs/carracing.gif)
 

@@ -4,7 +4,7 @@ import argparse
 
 from utils.init_env import init_env
 from utils.utils import create_log_dir
-from algorithms.bc import BehaviorCloning, BCDataSet
+from algorithms.agents.bc import BehaviorCloning, BCDataSet
 from trainers.behavior_cloning import BehaviorCloningTrainer
 
 

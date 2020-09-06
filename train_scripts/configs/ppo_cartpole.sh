@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-#export PYTHONPATH=$PYTHONPATH:../../
+export PYTHONPATH=$PYTHONPATH:../../
 python3 train_scripts/train_ppo.py \
 --log_dir "logs/CartPole/" \
 --env_name CartPole-v1 --train_env_num 4 --test_env_num 4 \

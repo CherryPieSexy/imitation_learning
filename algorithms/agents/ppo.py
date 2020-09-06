@@ -274,3 +274,18 @@ class PPO(PolicyGradient):
             time_log['img_aug'] = result_log.pop('img_aug_time')
 
         return result_log, time_log
+
+    # TODO: recurrence:
+    #  1) masking in _train_fn
+    #  2) loss averaging, i.e. (mask * loss).sum() / mask.sum()
+    #  3) index select fn, select indices randomly (like now) for feed-forward model,
+    #  4) select only rows for recurrent model. Look how it is done in iKostrikov repo
+
+    @staticmethod
+    def _mask_after_done(done):
+        pad = torch.zeros(done.size(1), dtype=torch.float32, device=done.device)
+        done_sum = torch.cumsum(done, dim=0)[:-1]
+        done_sum = torch.cat([pad, done_sum], dim=0)
+        # noinspection PyTypeChecker
+        mask = 1.0 - done_sum.clamp_max(1.0)
+        return mask
