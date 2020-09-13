@@ -4,7 +4,7 @@ import argparse
 from utils.init_env import init_env
 from utils.utils import create_log_dir
 from algorithms.nn import ActorCriticTwoMLP, ActorCriticCNN, ActorCriticDeepCNN
-from algorithms.policy_gradient import AgentInference
+from algorithms.agents.policy_gradient import AgentInference
 from algorithms.agents.ppo import PPO
 from trainers.on_policy import OnPolicyTrainer
 
@@ -25,8 +25,7 @@ def main(args):
     device_train = torch.device(args.device_train)
 
     if image_env:
-        # if args.deep_cnn:
-        if True:
+        if args.deep_cnn:
             nn_online = ActorCriticDeepCNN(action_size, args.policy)
             nn_train = ActorCriticDeepCNN(action_size, args.policy)
         else:
@@ -39,11 +38,24 @@ def main(args):
     nn_online.to(device_online)
     nn_train.to(device_train)
 
-    agent_online = AgentInference(nn_online, device_online, args.policy)
+    policy_args = dict()
+    if args.policy == 'RealNVP':
+        hidden_size, n_layers, std_scale = args.policy_args
+        policy_args = {
+            'action_size': action_size,
+            'hidden_size': hidden_size,
+            'n_layers': n_layers,
+            'std_scale': std_scale,
+            'train_sigma': False,
+            'squeeze': True
+        }
+
+    agent_online = AgentInference(nn_online, device_online, args.policy, policy_args)
 
     agent_train = PPO(
         nn_train, device_train,
-        args.policy, args.normalize_adv, args.returns_estimator,
+        args.policy, policy_args,
+        args.normalize_adv, args.returns_estimator,
         args.learning_rate, args.gamma, args.entropy, args.clip_grad,
         image_augmentation_alpha=args.image_aug_alpha,
         gae_lambda=args.gae_lambda,
@@ -59,7 +71,8 @@ def main(args):
     trainer = OnPolicyTrainer(
         agent_online, agent_train, args.update_period, False,
         train_env,
-        args.normalize_obs, args.scale_reward, args.normalize_reward,
+        args.normalize_obs, not args.freeze_obs_normalizer,
+        args.scale_reward, args.normalize_reward, not args.freeze_reward_normalizer,
         args.obs_clip, args.reward_clip,
         test_env=test_env,
         log_dir=args.log_dir
@@ -96,6 +109,11 @@ def parse_args():
     # nn
     parser.add_argument('--hidden_size', help='hidden size for MLP networks', type=int, default=0)
     parser.add_argument(
+        '--deep_cnn',
+        help='if True then \'deep\' version of CNN will be used',
+        action='store_true'
+    )
+    parser.add_argument(
         '--device_online',
         help='device for NN which collects data from environments, must be \'cpu\' or \'cuda\'',
         type=str
@@ -116,6 +134,12 @@ def parse_args():
         help='policy distribution. One from: '
              'Categorical, GumbelSoftmax, Beta, WideBeta, Normal, TanhNormal',
         type=str
+    )
+    parser.add_argument(
+        '--policy_args',
+        help='policy arguments, useful only for RealNVP. '
+             'List of 3 arguments: hidden_size, n_layers, std_scale, default [12, 4, 0.33]',
+        nargs="+", default=[12, 4, 0.3]
     )
     parser.add_argument(
         '--normalize_adv',
@@ -172,13 +196,25 @@ def parse_args():
         action='store_true'
     )
     parser.add_argument(
-        '--normalize_reward',
-        help='if True, then rewards will be normalized by running mean and variance, default False',
+        '--freeze_obs_normalizer',
+        help='if True, then obs normalizer statistics will be updated by running mean and variance, '
+             '(i.e. normal working regime), default=False',
         action='store_true'
     )
     parser.add_argument(
         '--scale_reward',
         help='if True, then rewards will be normalized by running mean and variance, default False',
+        action='store_true'
+    )
+    parser.add_argument(
+        '--normalize_reward',
+        help='if True, then rewards will be normalized by running mean and variance, default False',
+        action='store_true'
+    )
+    parser.add_argument(
+        '--freeze_reward_normalizer',
+        help='if True, then reward normalizer statistics will be updated by running mean and variance, '
+             '(i.e. normal working regime), default=False',
         action='store_true'
     )
     parser.add_argument('--obs_clip', type=float, default=-float('inf'))

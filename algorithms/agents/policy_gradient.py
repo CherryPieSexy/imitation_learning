@@ -15,21 +15,29 @@ class AgentInference:
             self,
             nn, device,
             distribution,
+            distribution_args,
             testing=False
     ):
         self.nn = nn
         self.device = device
         self.nn.to(device)
-        self.distribution = distributions_dict[distribution]()
+        self.distribution = distributions_dict[distribution](**distribution_args)
+        self.distribution_with_params = False
+        if hasattr(self.distribution, 'has_state'):
+            self.distribution_with_params = True
+            self.distribution.to(device)
         self.obs_normalizer = None
         self.testing = testing
 
     def load_state_dict(self, state):
         self.nn.load_state_dict(state['nn'])
+        if self.distribution_with_params:
+            self.distribution.load_state_dict(state['distribution'])
 
     def load(self, filename):
         checkpoint = torch.load(filename)
-        self.nn.load_state_dict(checkpoint['agent']['nn'])
+        agent_state = checkpoint['agent']
+        self.load_state_dict(agent_state)
         if 'obs_normalizer' in checkpoint:
             self.obs_normalizer = RunningMeanStd()
             self.obs_normalizer.load_state_dict(checkpoint['obs_normalizer'])
@@ -46,7 +54,8 @@ class AgentInference:
             observations = (observations - mean) / np.sqrt(var + 1e-8)
         with torch.no_grad():
             policy, _ = self.nn(torch.tensor(observations, dtype=torch.float32, device=self.device))
-        action, log_prob = self.distribution.sample(policy, deterministic)
+            # RealNVP requires 'no_grad' here
+            action, log_prob = self.distribution.sample(policy, deterministic)
         if return_pi:
             return action, policy
         else:
@@ -70,15 +79,18 @@ class AgentInference:
 class PolicyGradient:
     def __init__(
             self,
-            nn, device,
-            distribution, normalize_adv, returns_estimator,
+            actor_critic_nn, device,
+            distribution, distribution_args,
+            normalize_adv, returns_estimator,
             lr, gamma, entropy, clip_grad,
             gae_lambda=0.95, image_augmentation_alpha=0.0
     ):
         """
-        :param nn: neural network, policy, value = nn(obs)
+        :param actor_critic_nn: actor-critic neural network: policy, value = nn(obs)
                policy.size() == (T, B, dim(A) or 2 * dim(A))
                value.size() == (T, B)  - there is no '1' at the last dimension!
+        :param distribution: distribution type, str
+        :param distribution_args: distribution arguments, dict. Useful for RealNVP
         :param normalize_adv: True or False
         :param returns_estimator: '1-step', 'n-step', 'gae'
         :param lr, gamma, entropy, clip_grad: learning hyper-parameters
@@ -86,14 +98,22 @@ class PolicyGradient:
         :param image_augmentation_alpha: if > 0 then additional
                                          alpha * D_KL(pi, pi_aug) loss term will be used
         """
-        self.nn = nn
+        self.actor_critic_nn = actor_critic_nn
         self.device = device
 
-        self.distribution_str = distribution
-        self.distribution = distributions_dict[distribution]()
+        self.policy_distribution_str = distribution
+        self.policy_distribution = distributions_dict[distribution](**distribution_args)
 
-        self.nn.to(device)
-        self.opt = torch.optim.Adam(self.nn.parameters(), lr)
+        self.actor_critic_nn.to(device)
+
+        parameters_to_optimize = self.actor_critic_nn.parameters()
+        self.distribution_with_params = False
+        if hasattr(self.policy_distribution, 'has_state'):
+            self.distribution_with_params = True
+            self.policy_distribution.to(device)
+            parameters_to_optimize = list(parameters_to_optimize) + list(self.policy_distribution.parameters())
+
+        self.opt = torch.optim.Adam(parameters_to_optimize, lr)
 
         self.normalize_adv = normalize_adv
         self.returns_estimator = returns_estimator
@@ -105,13 +125,17 @@ class PolicyGradient:
 
     def state_dict(self):
         state_dict = {
-            'nn': self.nn.state_dict(),
+            'nn': self.actor_critic_nn.state_dict(),
             'opt': self.opt.state_dict()
         }
+        if self.distribution_with_params:
+            state_dict['distribution'] = self.policy_distribution.state_dict()
         return state_dict
 
     def load_state_dict(self, state_dict):
-        self.nn.load_state_dict(state_dict['nn'])
+        self.actor_critic_nn.load_state_dict(state_dict['nn'])
+        if self.distribution_with_params:
+            self.policy_distribution.load_state_dict(state_dict['distribution'])
         self.opt.load_state_dict(state_dict['opt'])
 
     def save(self, filename, obs_normalizer=None, reward_normalizer=None):
@@ -122,9 +146,12 @@ class PolicyGradient:
         :param reward_normalizer: RunningMeanStd object
         """
         state_dict = {
-            'nn': self.nn.state_dict(),
+            'nn': self.actor_critic_nn.state_dict(),
             'opt': self.opt.state_dict(),
         }
+        if hasattr(self.policy_distribution, 'has_state'):
+            state_dict['distribution'] = self.policy_distribution.state_dict()
+
         if obs_normalizer is not None:
             state_dict['obs_normalizer'] = obs_normalizer.state_dict()
         if reward_normalizer is not None:
@@ -133,14 +160,16 @@ class PolicyGradient:
 
     def load(self, filename):
         checkpoint = torch.load(filename)
-        self.nn.load_state_dict(checkpoint['agent']['nn'])
-        self.opt.load_state_dict(checkpoint['agent']['opt'])
+        agent_state = checkpoint['agent']
+        self.load_state_dict(agent_state)
+        # self.nn.load_state_dict(checkpoint['agent']['nn'])
+        # self.opt.load_state_dict(checkpoint['agent']['opt'])
 
     def train(self):
-        self.nn.train()
+        self.actor_critic_nn.train()
 
     def eval(self):
-        self.nn.eval()
+        self.actor_critic_nn.eval()
 
     def act(self, observations, return_pi=False, deterministic=False):
         """
@@ -149,10 +178,10 @@ class PolicyGradient:
         :param deterministic: True or False
         :return: action and log_prob, both torch.Tensor with shape = [T, B, ...], with gradients
         """
-        policy, _ = self.nn(
+        policy, _ = self.actor_critic_nn(
             torch.tensor(observations, dtype=torch.float32, device=self.device)
         )
-        action, log_prob = self.distribution.sample(policy, deterministic)
+        action, log_prob = self.policy_distribution.sample(policy, deterministic)
         # we can not use 'action.cpu().numpy()' here, because we want action to have gradient
         if return_pi:
             return action, policy
@@ -209,13 +238,13 @@ class PolicyGradient:
         self.opt.zero_grad()
         loss.backward()
         gradient_norm = clip_grad_norm_(
-            self.nn.parameters(), self.clip_grad
+            self.actor_critic_nn.parameters(), self.clip_grad
         )
         self.opt.step()
         return gradient_norm
 
     def _compute_returns(self, observations, rewards, not_done):
-        policy, value = self.nn(observations)
+        policy, value = self.actor_critic_nn(observations)
         policy = policy[:-1]
         value, next_value = value[:-1], value[1:].detach()
 
@@ -239,8 +268,8 @@ class PolicyGradient:
     @time_it
     def _augmentation_loss(self, policy, value, observations):
         observations_aug = batch_crop(observations)
-        policy_aug, value_aug = self.nn(observations_aug)
-        policy_div = kl_divergence(self.distribution_str, policy, policy_aug).mean()
+        policy_aug, value_aug = self.actor_critic_nn(observations_aug)
+        policy_div = kl_divergence(self.policy_distribution_str, policy, policy_aug).mean()
         value_div = 0.5 * ((value - value_aug) ** 2).mean()
         return policy_div, value_div
 

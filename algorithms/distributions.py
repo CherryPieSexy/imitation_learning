@@ -4,9 +4,10 @@ import torch.nn.functional as fun
 import torch.distributions as dist
 
 
+from algorithms.real_nvp import RealNVP
+
+
 # Distributions is used to sample actions or states, compute log-probs and entropy
-
-
 class Distribution:
     def sample(self, parameters, deterministic):
         raise NotImplementedError
@@ -146,7 +147,6 @@ def convert_parameters_normal(parameters):
 
 
 class TanhNormal(Distribution):
-    # WARNING: for some reason, this distribution produces Nans in policy -_-
     def __init__(self):
         self.dist_fn = dist.Normal
         self._convert_parameters = convert_parameters_normal
@@ -185,17 +185,11 @@ class TanhNormal(Distribution):
         return log_prob.sum(-1)
 
     def entropy(self, parameters, sample, **kwargs):
-        mean, sigma = self._convert_parameters(parameters)
-        distribution = self.dist_fn(mean, sigma)
-        z = self._env_to_agent(sample)
-        log_prob = distribution.log_prob(z)
-
-        # noinspection PyTypeChecker
-        # d_tanh_dx = math.log(4.0) - 2 * torch.log(z.exp() + (-z).exp())
-        log_d_tanh = torch.log(1 - sample.pow(2))
+        log_prob = self.log_prob(parameters, sample)
+        log_d_tanh = torch.log(1 - sample.pow(2)).sum(-1)
         entropy = -log_prob + log_d_tanh
 
-        return entropy.sum(-1)
+        return entropy
 
 
 class Normal(TanhNormal):
@@ -221,5 +215,6 @@ distributions_dict = {
     'Beta': Beta,
     'WideBeta': WideBeta,
     'TanhNormal': TanhNormal,
-    'Normal': Normal
+    'Normal': Normal,
+    'RealNVP': RealNVP
 }

@@ -8,7 +8,7 @@ from tqdm import tqdm, trange
 
 from utils.init_env import init_env
 from algorithms.nn import ActorCriticTwoMLP, ActorCriticCNN, ActorCriticDeepCNN
-from algorithms.policy_gradient import AgentInference
+from algorithms.agents.policy_gradient import AgentInference
 
 
 def _to_infinity():
@@ -127,6 +127,16 @@ def play_from_folder(
     observation_size, action_size = config['observation_size'], config['action_size']
     hidden_size = config['hidden_size']
     policy = config['policy']
+    if policy == 'RealNVP':
+        policy_args = config['policy_args']
+        policy_args = {
+            'action_size': action_size,
+            'hidden_size': policy_args[0],
+            'n_layers': policy_args[1],
+            'std_scale': policy_args[2]
+        }
+    else:
+        policy_args = {}
 
     # initialize agent and environment
     if image_env:
@@ -137,7 +147,7 @@ def play_from_folder(
     else:
         nn = ActorCriticTwoMLP(observation_size, action_size, hidden_size, policy)
     device = torch.device('cpu')
-    agent = AgentInference(nn, device, policy, testing=True)
+    agent = AgentInference(nn, device, policy, policy_args, testing=True)
     agent.eval()
     env = init_env(env_name, 1, action_repeat=action_repeat)
     agent.load(log_folder + f'checkpoints/epoch_{checkpoint_id}.pth')
@@ -163,6 +173,11 @@ def parse_args():
         help='if of checkpoint to load'
     )
     parser.add_argument(
+        '--random', '-r',
+        help='if True then action will be sampled from the policy instead from taking mean, default False',
+        action='store_true'
+    )
+    parser.add_argument(
         '--silent', '-s',
         help='if True then episodes will not be shown in window, '
              'and only mean reward will be printed at the end, default False',
@@ -185,7 +200,7 @@ def parse_args():
         default=None, type=str, required=False
     )
     parser.add_argument(
-        '--reward_threshold', '-r',
+        '--reward_threshold', '-t',
         help='if \'save_demo\' arg provided, then '
              'only episodes with reward > \'reward_threshold\' will be saved into buffer',
         default=None, type=float, required=False
@@ -201,8 +216,8 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
     play_from_folder(
-        args.log_folder, args.checkpoint_id, False,
-        True, args.n_episodes, args.silent,
+        args.log_folder, args.checkpoint_id, True,
+        not args.random, args.n_episodes, args.silent,
         args.reward_threshold, args.save_demo,
         args.pause_first
     )

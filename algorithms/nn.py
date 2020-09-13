@@ -37,6 +37,8 @@ class ActorCriticTwoMLP(nn.Module):
         elif distribution in ['TanhNormal', 'Normal']:
             # self.actor_log_std = nn.Parameter(torch.full((action_size,), -1.34))
             self.actor_log_std = nn.Parameter(torch.zeros(action_size))
+        elif distribution == 'RealNVP':
+            gain_policy = gain
 
         self.policy = nn.Sequential(
             init(nn.Linear(observation_size, hidden_size), gain=gain), nn.Tanh(),
@@ -131,12 +133,21 @@ class ActorCriticDeepCNN(ActorCriticCNN):
             init(nn.Linear(256, 100), gain=gain), nn.ELU(),
             init(nn.Linear(100, 1))
         )
-        if distribution in ['Beta', 'TanhNormal', 'Normal']:
+        if distribution in ['Beta', 'WideBeta', 'TanhNormal', 'Normal']:
             action_size *= 2
         self.policy = nn.Sequential(
             init(nn.Linear(256, 100), gain=gain), nn.ELU(),
             init(nn.Linear(100, action_size), gain=gain_policy)
         )
+
+
+class GradientReversalLayer(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        # forward: x, backward: -x
+        return 2 * x.detach() - x
 
 
 class ModelMLP(nn.Module):

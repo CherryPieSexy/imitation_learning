@@ -4,7 +4,7 @@ import torch
 import numpy as np
 
 from utils.utils import time_it
-from algorithms.policy_gradient import PolicyGradient
+from algorithms.agents.policy_gradient import PolicyGradient
 
 
 class PPO(PolicyGradient):
@@ -56,7 +56,7 @@ class PPO(PolicyGradient):
 
     def _policy_loss(self, policy_old, policy, actions, advantage):
         log_pi_for_actions_old = policy_old
-        log_pi_for_actions = self.distribution.log_prob(policy, actions)
+        log_pi_for_actions = self.policy_distribution.log_prob(policy, actions)
         log_prob_ratio = log_pi_for_actions - log_pi_for_actions_old
         log_prob_ratio.clamp_max_(20)
 
@@ -134,7 +134,7 @@ class PPO(PolicyGradient):
         # value_loss = self._value_loss(values_old, values, returns)
         value_loss = self._mse_value_loss(values, returns)
         policy_loss = self._policy_loss(policy_old, policy, actions, advantage)
-        entropy = self.distribution.entropy(policy, actions).mean()
+        entropy = self.policy_distribution.entropy(policy, actions).mean()
         loss = value_loss - policy_loss - self.entropy * entropy
         return value_loss, policy_loss, entropy, loss
 
@@ -157,7 +157,7 @@ class PPO(PolicyGradient):
             # here we can call nn.forward(...) only on interesting data
             # observations[row, col] has only batch dimension =>
             # need to unsqueeze and squeeze back
-            policy, value = self.nn(observations[row, col].unsqueeze(0))
+            policy, value = self.actor_critic_nn(observations[row, col].unsqueeze(0))
             policy, value = policy.squeeze(0), value.squeeze(0)
 
         # 2) calculate losses
@@ -239,7 +239,7 @@ class PPO(PolicyGradient):
                observations of shape [time + 1, batch, ...]
                I want to store 'log_probs' inside rollout
                because online policy (i.e. the policy gathered rollout)
-               may not be the trained policy
+               may differ from the trained policy
         :return: (loss_dict, time_dict)
         """
         # 'done' converts into 'not_done' inside '_rollout_to_tensors' method

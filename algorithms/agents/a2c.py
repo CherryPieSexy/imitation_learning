@@ -1,4 +1,4 @@
-from algorithms.policy_gradient import PolicyGradient
+from algorithms.agents.policy_gradient import PolicyGradient
 
 
 class A2C(PolicyGradient):
@@ -9,14 +9,14 @@ class A2C(PolicyGradient):
     """
 
     def _policy_loss(self, policy, actions, advantages):
-        log_pi_for_actions = self.distribution.log_prob(policy, actions)
+        log_pi_for_actions = self.policy_distribution.log_prob(policy, actions)
         policy_loss = log_pi_for_actions * advantages.detach()
         return policy_loss.mean()
 
     def _main(self, observations, policy, values, actions, returns, advantages):
         value_loss = 0.5 * ((values - returns) ** 2).mean()
         policy_loss = self._policy_loss(policy, actions, advantages)
-        entropy = self.distribution.entropy(policy).mean()
+        entropy = self.policy_distribution.entropy(policy).mean()
         loss = value_loss - policy_loss - self.entropy * entropy
         if self.image_augmentation_alpha > 0.0:
             (policy_div, value_div), img_aug_time = self._augmentation_loss(

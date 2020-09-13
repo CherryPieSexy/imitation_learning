@@ -15,7 +15,8 @@ class OnPolicyTrainer(BaseTrainer):
             agent_online, agent_train,
             update_period, return_pi,
             train_env,
-            normalize_obs, scale_reward, normalize_reward,
+            normalize_obs, train_obs_normalizer,
+            scale_reward, normalize_reward, train_reward_normalizer,
             obs_clip, reward_clip,
             **kwargs
     ):
@@ -28,8 +29,10 @@ class OnPolicyTrainer(BaseTrainer):
         :param train_env:
         :param test_env:
         :param normalize_obs:
+        :param train_obs_normalizer
         :param scale_reward:
         :param normalize_reward:
+        :param train_reward_normalizer
         :param obs_clip:
         :param reward_clip:
         :param log_dir:
@@ -53,11 +56,13 @@ class OnPolicyTrainer(BaseTrainer):
 
         # normalizers:
         self._obs_normalizer = RunningMeanStd() if normalize_obs else None
+        self._train_obs_normalizer = train_obs_normalizer
         self._obs_clip = obs_clip
         assert not (normalize_reward and scale_reward), \
             'reward may be normalized or scaled, but not both at the same time!'
-        # TODO: use scaling here...
+        self._reward_scaler = RunningMeanStd() if scale_reward else None
         self._reward_normalizer = RunningMeanStd() if normalize_reward else None
+        self._train_reward_normalizer = train_reward_normalizer
         self._reward_clip = reward_clip
 
         # store episode reward, length, return and number for each train environment
@@ -126,12 +131,13 @@ class OnPolicyTrainer(BaseTrainer):
 
     def _normalize_reward(self, reward, training):
         # 'baselines' version:
-        # if self._reward_normalizer is not None:
-        #     if training:
-        #         self._reward_normalizer.update(self._env_return)
-        #     var = self._reward_normalizer.var
-        #     reward = reward / np.sqrt(var + 1e-8)
-        #     reward = np.clip(reward, -self._reward_clip, self._reward_clip)
+        if self._reward_scaler is not None:
+            if training:
+                self._reward_scaler.update(self._env_return)
+            var = self._reward_scaler.var
+            reward = reward / np.sqrt(var + 1e-8)
+            reward = np.clip(reward, -self._reward_clip, self._reward_clip)
+
         # 'my' version:
         if self._reward_normalizer is not None:
             if training:
@@ -139,6 +145,7 @@ class OnPolicyTrainer(BaseTrainer):
             mean, var = self._reward_normalizer.mean, self._reward_normalizer.var
             reward = (reward - mean) / np.sqrt(var + 1e-8)
             reward = np.clip(reward, -self._reward_clip, self._reward_clip)
+
         return reward
 
     @time_it
@@ -168,8 +175,8 @@ class OnPolicyTrainer(BaseTrainer):
 
             raw_rewards.append(np.copy(reward))
 
-            observation = self._normalize_observation(observation, training=True)
-            reward = self._normalize_reward(reward, training=True)
+            observation = self._normalize_observation(observation, training=self._train_obs_normalizer)
+            reward = self._normalize_reward(reward, training=self._train_reward_normalizer)
 
             observations.append(observation)
             actions.append(action)
@@ -228,6 +235,11 @@ class OnPolicyTrainer(BaseTrainer):
     def _update_online_agent(self):
         self._agent_online.load_state_dict(self._agent_train.state_dict())
 
+    def _save_n_test(self, epoch, n_tests):
+        checkpoint_name = self._log_dir + 'checkpoints/' + f'epoch_{epoch}.pth'
+        self.save(checkpoint_name)
+        self._test_agent(epoch, n_tests, self._agent_online)
+
     def train(self, n_epoch, n_steps, rollout_len, n_tests):
         """
         Run training for 'n_epoch', each epoch takes 'n_steps' training steps
@@ -241,7 +253,7 @@ class OnPolicyTrainer(BaseTrainer):
         :return:
         """
         observation = self._train_env.reset()
-        self._test_agent(0, n_tests, self._agent_online)
+        self._save_n_test(0, n_tests)
 
         self._agent_train.train()  # always in training mode
         for epoch in range(n_epoch):
@@ -255,7 +267,5 @@ class OnPolicyTrainer(BaseTrainer):
                     self._update_online_agent()
 
             self._update_online_agent()
-            checkpoint_name = self._log_dir + 'checkpoints/' + f'epoch_{epoch}.pth'
-            self.save(checkpoint_name)
-            self._test_agent(epoch + 1, n_tests, self._agent_online)
+            self._save_n_test(epoch + 1, n_tests)
         self._writer.close()

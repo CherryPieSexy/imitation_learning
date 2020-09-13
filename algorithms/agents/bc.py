@@ -3,7 +3,7 @@ import pickle
 import torch
 from torch.utils.data import Dataset
 
-from algorithms.policy_gradient import PolicyGradient
+from algorithms.agents.policy_gradient import PolicyGradient
 
 
 class BehaviorCloning(PolicyGradient):
@@ -19,12 +19,12 @@ class BehaviorCloning(PolicyGradient):
         return x.to(torch.float32).to(self.device)
 
     def _mean_loss(self, policy, actions):
-        mean, _ = self.distribution.sample(policy, deterministic=True)
+        mean, _ = self.policy_distribution.sample(policy, deterministic=True)
         loss = 0.5 * (mean - actions) ** 2
         return loss
 
     def _log_prob_loss(self, policy, actions):
-        log_pi_for_actions = self.distribution.log_prob(policy, actions)
+        log_pi_for_actions = self.policy_distribution.log_prob(policy, actions)
         loss = -log_pi_for_actions
         return loss
 
@@ -34,7 +34,7 @@ class BehaviorCloning(PolicyGradient):
         observations = self.to_tensor(observations).unsqueeze(1)
         actions = self.to_tensor(actions).unsqueeze(1)
 
-        policy, _ = self.nn(observations)
+        policy, _ = self.actor_critic_nn(observations)
 
         loss = self._loss_fn(policy, actions).mean()
 

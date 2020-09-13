@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from algorithms.distributions import convert_parameters_normal
-from algorithms.policy_gradient import PolicyGradient
+from algorithms.agents.policy_gradient import PolicyGradient
 
 
 class VMPO(PolicyGradient):
@@ -19,11 +19,11 @@ class VMPO(PolicyGradient):
         self.eps_eta = self._log_uniform(eps_eta_range)
 
         param_list = [self.eta]
-        if self.distribution_str == 'Categorical':
+        if self.policy_distribution_str == 'Categorical':
             self.alpha = self._init_param(5.0, True)
             self.eps_alpha = self._log_uniform(eps_mu_range)
             param_list.append(self.alpha)
-        elif self.distribution_str in ['Normal', 'TanhNormal']:
+        elif self.policy_distribution_str in ['Normal', 'TanhNormal']:
             self.alpha_mu = self._init_param(1.0, True)
             self.alpha_sigma = self._init_param(1.0, True)
             self.eps_mu = self._log_uniform(eps_mu_range)
@@ -31,7 +31,7 @@ class VMPO(PolicyGradient):
             param_list.append(self.alpha_mu)
             param_list.append(self.alpha_sigma)
         else:
-            msg = f'V-MPO support only Categorical and Normal distributions, not {self.distribution_str}'
+            msg = f'V-MPO support only Categorical and Normal distributions, not {self.policy_distribution_str}'
             raise ValueError(msg)
         self.param_opt = torch.optim.Adam(param_list, lr=1e-4)
         self.param_min = self._init_param(1e-8, False)
@@ -90,7 +90,7 @@ class VMPO(PolicyGradient):
         return row, col, half
 
     def _policy_loss(self, policy, actions, softmax_adv):
-        log_pi_for_actions = self.distribution.log_prob(policy, actions)
+        log_pi_for_actions = self.policy_distribution.log_prob(policy, actions)
         policy_loss = -log_pi_for_actions * softmax_adv.detach()
         return policy_loss.sum()
 
@@ -99,10 +99,10 @@ class VMPO(PolicyGradient):
         return alpha * (eps_alpha - d_kl.detach()) + alpha.detach() * d_kl
 
     def _alpha_loss(self, policy_old, policy):
-        if self.distribution_str == 'Categorical':
+        if self.policy_distribution_str == 'Categorical':
             d_kl = self._kl_divergence_categorical(policy_old, policy)
             alpha_loss = self._alpha_loss_formula(self.alpha, self.eps_alpha, d_kl)
-        elif self.distribution_str == 'Normal':
+        elif self.policy_distribution_str == 'Normal':
             d_kl_mean, d_kl_sigma = self._kl_divergence_normal(policy_old, policy)
             alpha_loss_mu = self._alpha_loss_formula(self.alpha_mu, self.eps_mu, d_kl_mean)
             alpha_loss_sigma = self._alpha_loss_formula(self.alpha_sigma, self.eps_sigma, d_kl_sigma)
@@ -161,9 +161,9 @@ class VMPO(PolicyGradient):
             # noinspection PyUnboundLocalVariable
             result.update(upd)
 
-        if self.distribution_str == 'Categorical':
+        if self.policy_distribution_str == 'Categorical':
             result['alpha'] = self.alpha.item()
-        elif self.distribution_str == 'Normal':
+        elif self.policy_distribution_str == 'Normal':
             result['alpha_mu'] = self.alpha_mu.item()
             result['alpha_sigma'] = self.alpha_sigma.item()
 
@@ -171,9 +171,9 @@ class VMPO(PolicyGradient):
 
     def _update_eta_alpha(self):
         self.eta.data = torch.max(self.eta, self.param_min)
-        if self.distribution_str == 'Categorical':
+        if self.policy_distribution_str == 'Categorical':
             self.alpha.data = torch.max(self.alpha, self.param_min)
-        elif self.distribution_str == 'Normal':
+        elif self.policy_distribution_str == 'Normal':
             self.alpha_mu.data = torch.max(self.alpha_mu, self.param_min)
             self.alpha_sigma.data = torch.max(self.alpha_sigma, self.param_min)
 
