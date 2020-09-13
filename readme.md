@@ -24,11 +24,11 @@ For example, I was able to train Humanoid to run for
 ## Current Functionality
 
 For now this repo contains some model-free on-policy algorithm implementations: A2C, PPO, V-MPO. 
-Each algorithm supports discrete (Categorical, GumbelSoftmax) and continuous (Beta, Normal, tanh(Normal)) policy distributions, 
-and vector or image observation environments.
+Each algorithm supports discrete (Categorical, GumbelSoftmax) and continuous (Beta, Normal, tanh(Normal), RealNVP) policy distributions, 
+and vector or image observation environments. Beta and tanh(Normal) works best in my experiments (tested on BipedalWalker and Humanoid environments).
 
 As found in paper [*Implementation Matters*](https://arxiv.org/abs/2005.12729), 
-PPO algo works mostly because of "code-level" optimizations. Here I implemented some of them:
+PPO algo works mostly because of "code-level" optimizations. Here I implemented most of them:
 - [x] Value function clipping
 - [x] Observation normalization & clipping
 - [x] Reward scaling & clipping (in my experiments normalization works better compared to scaling)
@@ -117,6 +117,12 @@ PPO training is not stable enough: it focusing on _local_ reward, not in global 
 It means that Bipedal, Humanoid and Car mostly improve their speed 
 and don't care about falling on the ground or driving off the track. 
 However, maximum reward is kinda stable - I can obtain ~10-11k max reward on Humanoid-v3 after 2 training epoch.
+
+RealNVP converges too fast and exploration becomes too small to improve further. 
+Tining entropy regularization is difficult: too low entropy coefficient makes no difference, 
+with too high values agent optimize only entropy.
+
+Entropy calculation for squeezed distribution (tanh(Normal) and RealNVP) possibly coded wrong, need to be checked. 
 
 GPU support is not tested yet
 
