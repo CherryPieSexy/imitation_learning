@@ -3,10 +3,10 @@ import pickle
 import torch
 from torch.utils.data import Dataset
 
-from algorithms.agents.policy_gradient import PolicyGradient
+from algorithms.agents.base_agent import AgentTrain
 
 
-class BehaviorCloning(PolicyGradient):
+class BehaviorCloning(AgentTrain):
     def __init__(self, *args, loss_type='mse', **kwargs):
         assert loss_type in ['mse', 'likelihood']
         if loss_type == 'mse':

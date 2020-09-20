@@ -1,14 +1,14 @@
 import pickle
 import argparse
 
-import json
+import yaml
 import torch
 import numpy as np
 from tqdm import tqdm, trange
 
 from utils.init_env import init_env
-from algorithms.nn import ActorCriticTwoMLP, ActorCriticCNN, ActorCriticDeepCNN
-from algorithms.agents.policy_gradient import AgentInference
+from algorithms.nn.actor_critic import init_actor_critic
+from algorithms.agents.base_agent import AgentInference
 
 
 def _to_infinity():
@@ -34,7 +34,7 @@ def play_episode(
             input("press 'enter' to continue...")
     while not done:
         action = agent.act(obs, deterministic=deterministic)
-        obs, reward, done, _ = env.step(action, render=not silent)
+        obs, reward, done, info = env.step(action, render=not silent)
         episode_reward += reward
         episode_len += 1
 
@@ -42,6 +42,9 @@ def play_episode(
         actions.append(action)
         rewards.append(reward)
 
+        # if info['flag_get']:
+        #     from time import sleep
+        #     sleep(100500)
     if not silent:
         env.render()
 
@@ -113,65 +116,56 @@ def play_n_episodes(
 
 
 def play_from_folder(
-        log_folder, checkpoint_id, deep,
-        deterministic, n_episodes, silent,
-        reward_threshold, save_demo,
-        pause_first
+        folder, config_path, checkpoint_path,
+        deterministic, silent, pause_first, n_episodes,
+        save_gif, reward_threshold, save_demo,
 ):
-    with open(log_folder + 'config.json') as f:
-        config = json.load(f)
+    if save_gif:
+        raise ValueError('gif saving is not yet implemented...')
 
-    action_repeat = config['action_repeat']
-    env_name = config['env_name']
-    image_env = config['image_env']
-    observation_size, action_size = config['observation_size'], config['action_size']
-    hidden_size = config['hidden_size']
-    policy = config['policy']
-    if policy == 'RealNVP':
-        policy_args = config['policy_args']
-        policy_args = {
-            'action_size': action_size,
-            'hidden_size': policy_args[0],
-            'n_layers': policy_args[1],
-            'std_scale': policy_args[2]
-        }
-    else:
-        policy_args = {}
+    with open(folder + config_path) as f:
+        config = yaml.safe_load(f)
 
-    # initialize agent and environment
-    if image_env:
-        if deep:
-            nn = ActorCriticDeepCNN(action_size, policy)
-        else:
-            nn = ActorCriticCNN(action_size, policy)
-    else:
-        nn = ActorCriticTwoMLP(observation_size, action_size, hidden_size, policy)
+    test_env_args = config['test_env_args']
+    test_env_args['env_num'] = 1
+    test_env = init_env(**test_env_args)
+
     device = torch.device('cpu')
-    agent = AgentInference(nn, device, policy, policy_args, testing=True)
-    agent.eval()
-    env = init_env(env_name, 1, action_repeat=action_repeat)
-    agent.load(log_folder + f'checkpoints/epoch_{checkpoint_id}.pth')
+    nn_online = init_actor_critic(config['actor_critic_nn_type'], config['actor_critic_nn_args'])
+    nn_online.to(device)
+    policy = config['policy']
+    policy_args = config['policy_args']
+    agent = AgentInference(nn_online, device, policy, policy_args, testing=True)
+    agent.load(folder + checkpoint_path)
     agent.eval()
     play_n_episodes(
-        env, agent,
+        test_env, agent,
         deterministic, n_episodes, silent,
         reward_threshold, save_demo,
         pause_first
     )
-    env.close()
+    test_env.close()
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    # config + checkpoint part
+    parser.add_argument(
+        '--folder', '-f',
+        help='this will be added before config and checkpoint paths, default \'\'',
+        default=''
+    )
+    parser.add_argument(
+        '--config', '-c',
+        help='path to config which contains agent and environment parameters, default \'config.yaml\'',
+        default='config.yaml'
+    )
+    parser.add_argument(
+        '--checkpoint', '-p',
+        help='path to checkpoint which contains agent weights'
+    )
 
-    parser.add_argument(
-        '--log_folder', '-l',
-        help='log folder that contains checkpoint to load'
-    )
-    parser.add_argument(
-        '--checkpoint_id', '-i',
-        help='if of checkpoint to load'
-    )
+    # playing episodes part
     parser.add_argument(
         '--random', '-r',
         help='if True then action will be sampled from the policy instead from taking mean, default False',
@@ -184,7 +178,7 @@ def parse_args():
         action='store_true'
     )
     parser.add_argument(
-        '--pause_first', '-p',
+        '--pause_first',
         help='if True, pauses the first episode at the first frame until enter press. '
              'It is useful to record video with Kazam or something else, default False',
         action='store_true'
@@ -194,6 +188,8 @@ def parse_args():
         help='number of episodes to play or save demo, default 5',
         default=5, type=int
     )
+
+    # saving results part
     parser.add_argument(
         '--save_gif', '-g',
         help='file name to save gif of played episodes (max 5) into, not yet implemented',
@@ -215,9 +211,9 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
+
     play_from_folder(
-        args.log_folder, args.checkpoint_id, True,
-        not args.random, args.n_episodes, args.silent,
-        args.reward_threshold, args.save_demo,
-        args.pause_first
+        args.folder, args.config, args.checkpoint,
+        not args.random, args.silent, args.pause_first, args.n_episodes,
+        args.save_gif, args.reward_threshold, args.save_demo,
     )

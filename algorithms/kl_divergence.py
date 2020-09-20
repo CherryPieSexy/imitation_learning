@@ -12,6 +12,16 @@ def _d_kl_categorical(p, q):
     return d_kl
 
 
+def _d_kl_bernoulli(p, q):
+    p_probs = torch.sigmoid(p)
+    q_probs = torch.sigmoid(q)
+    t1 = p_probs * (p_probs / q_probs).log()
+    # noinspection PyTypeChecker,PyUnresolvedReferences
+    t2 = (1.0 - p_probs) * ((1.0 - p_probs) / (1.0 - q_probs)).log()
+    d_kl = (t1 + t2).mean(-1)
+    return d_kl
+
+
 def _d_kl_normal(p, q):
     # p = target, q = online
     p_mean, p_sigma = convert_parameters_normal(p)
@@ -35,6 +45,7 @@ def _d_kl_beta(p, q):
 
 d_kl_dict = {
     'Categorical': _d_kl_categorical,
+    'Bernoulli': _d_kl_bernoulli,
     'Normal': _d_kl_normal,
     # 'TanhNormal': _d_kl_normal,  does not work :(
     'Beta': _d_kl_beta

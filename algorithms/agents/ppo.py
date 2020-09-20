@@ -4,10 +4,10 @@ import torch
 import numpy as np
 
 from utils.utils import time_it
-from algorithms.agents.policy_gradient import PolicyGradient
+from algorithms.agents.base_agent import AgentTrain
 
 
-class PPO(PolicyGradient):
+class PPO(AgentTrain):
     """Proximal Policy Optimization implementation
 
     This class contains core PPO methods:
@@ -20,29 +20,29 @@ class PPO(PolicyGradient):
     def __init__(
             self,
             *args,
-            ppo_epsilon,
-            use_ppo_value_loss,
-            rollback_alpha,
-            recompute_advantage,
             ppo_n_epoch,
             ppo_n_mini_batches,
+            ppo_epsilon=0.2,
+            use_ppo_value_loss=False,
+            rollback_alpha=0.05,
+            recompute_advantage=False,
             **kwargs
     ):
         """
         PPO algorithm class
 
         :param args: PolicyGradient class args
+        :param ppo_n_epoch:         int, number of training epoch on one rollout
+        :param ppo_n_mini_batches:  int, number of mini-batches into which
+                                    the training data is divided during one epoch
         :param ppo_epsilon:         float, policy (and optionally value) clipping parameter
         :param use_ppo_value_loss:  bool, switches value loss function
-                                    from PPO-like clipped (True) or simple MSE (False)
+                                    from PPO-like clipped (True) or simple MSE (False).
+                                    Currently only MSE loss is supported.
         :param rollback_alpha:      float, policy-rollback loss parameter.
                                     Rollback is turned on if rollback_alpha > 0
         :param recompute_advantage: bool, if True the returns and advantage
                                     will be recomputed after each nn update
-        :param ppo_n_epoch:         int, number of training epoch on one rollout
-        :param ppo_n_mini_batches:  int, number of mini-batches into which
-                                    the training data is divided during one epoch
-
         :param kwargs:
         """
         super().__init__(*args, **kwargs)

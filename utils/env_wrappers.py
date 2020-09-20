@@ -1,3 +1,4 @@
+import importlib
 from _collections import deque
 
 import gym
@@ -92,9 +93,10 @@ class ImageEnvWrapper(gym.Wrapper):
     # crop and resize
     def __init__(
             self, env,
-            convert_to_gray,
-            x_start, x_end, y_start, y_end,
-            x_size, y_size
+            convert_to_gray=True,
+            x_start=0, x_end=-1,
+            y_start=0, y_end=-1,
+            x_size=256, y_size=256
     ):
         super().__init__(env)
         self.convert_to_gray = convert_to_gray
@@ -158,3 +160,27 @@ class StateLoadWrapper(gym.Wrapper):
     def load_state(self, obs):
         state = self.obs_to_env_fn(obs)
         self.env.set_state(**state)
+
+
+class CustomWrapper(gym.Wrapper):
+    def __init__(self, env, custom_wrapper_path, custom_wrapper_args):
+        """Custom environment wrapper which can be used with any function.
+
+        :param env:
+        :param custom_wrapper_path: path to function which will be applied after action execution.
+               Must have form 'folder.sub_folder.file:class_name'
+        """
+        super().__init__(env)
+        module_import_path, class_name = custom_wrapper_path.split(':')
+        module = importlib.import_module(module_import_path)
+        self.custom_wrapper = getattr(module, class_name)(**custom_wrapper_args)
+
+    def step(self, action, **kwargs):
+        observation, reward, done, info = self.env.step(action, **kwargs)
+        observation, reward, done, info = self.custom_wrapper.step(observation, reward, done, info)
+        return observation, reward, done, info
+
+    def reset(self):
+        obs = self.env.reset()
+        obs = self.custom_wrapper.reset(obs)
+        return obs

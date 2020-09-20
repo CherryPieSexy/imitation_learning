@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch.distributions import Normal
 
 
-from algorithms.nn import init
+from algorithms.nn.actor_critic import init
 
 
 class MLP(nn.Module):
@@ -92,10 +92,22 @@ class RealNVP(nn.Module):
             std_scale=1.0, train_sigma=False,
             squeeze=False
     ):
+        """RealNVP policy distribution
+
+        :param action_size: len of action vector, int
+        :param hidden_size: number of units in hidden layers, int
+        :param n_layers: number of hidden layers, int
+        :param std_scale: initial std value, float, must be positive
+        :param train_sigma: if True then std of base (Normal) distribution
+                            will be trained, default False
+        :param squeeze: if True then Tanh will be applied to the output,
+                        default False
+        """
         super().__init__()
         self.has_state = True
 
         prior_mean = torch.zeros(action_size, dtype=torch.float32)
+        assert std_scale > 0.0
         prior_sigma = std_scale * torch.ones(action_size, dtype=torch.float32)
 
         self.prior_mean = prior_mean
@@ -184,14 +196,6 @@ class RealNVP(nn.Module):
         log_prob += log_det
         prior_log_prob = self._prior_log_prob(layer_output)
         log_prob += prior_log_prob
-        # import numpy as np
-        # if np.isnan(log_prob.detach().mean().item()) or np.isinf(log_prob.detach().mean().item()):
-        #     print('I fall asleep...')
-        #     print(layer_input, layer_input.mean().item())
-        #     print(layer_output, layer_output.mean().item())
-        #     print(log_prob.detach().numpy())
-        #     from time import sleep
-        #     sleep(100500)
         return log_prob
 
     def entropy(self, parameters, sample):

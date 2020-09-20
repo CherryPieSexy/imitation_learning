@@ -1,7 +1,7 @@
-from algorithms.agents.policy_gradient import PolicyGradient
+from algorithms.agents.base_agent import AgentTrain
 
 
-class A2C(PolicyGradient):
+class A2C(AgentTrain):
     """
     can act (with grad, it may be useful) and calculate loss on rollout.
     This class defines A2C-specific parts, such as

@@ -2,16 +2,16 @@ import torch
 import numpy as np
 
 from algorithms.distributions import convert_parameters_normal
-from algorithms.agents.policy_gradient import PolicyGradient
+from algorithms.agents.base_agent import AgentTrain
 
 
-class VMPO(PolicyGradient):
+class VMPO(AgentTrain):
     def __init__(
             self,
             *args,
-            eps_eta_range,
-            eps_mu_range,
-            eps_sigma_range,
+            eps_eta_range=(0.01, 0.01),
+            eps_mu_range=(0.005, 0.01),
+            eps_sigma_range=(5e-6, 5e-5),
             **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -135,14 +135,15 @@ class VMPO(PolicyGradient):
         loss = value_loss + policy_loss + eta_loss + alpha_loss
 
         # 5) image_aug loss
-        if self.image_augmentation_loss:
-            policy_div, value_div = self._augmentation_loss(
+        if self.image_augmentation_alpha > 0.0:
+            (policy_div, value_div), img_aug_time = self._augmentation_loss(
                 policy.detach(), values.detach(), observations
             )
-            loss += policy_div + value_div
+            loss += self.image_augmentation_alpha * (policy_div + value_div)
             upd = {
                 'policy_div': policy_div.item(),
-                'value_div': value_div.item()
+                'value_div': value_div.item(),
+                'img_aug_time': img_aug_time
             }
 
         grad_norm = self._optimize_loss(loss)
@@ -157,7 +158,7 @@ class VMPO(PolicyGradient):
             'loss': loss.item(),
             'grad_norm': grad_norm
         }
-        if self.image_augmentation_loss:
+        if self.image_augmentation_alpha > 0.0:
             # noinspection PyUnboundLocalVariable
             result.update(upd)
 

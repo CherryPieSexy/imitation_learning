@@ -76,13 +76,13 @@ class AgentInference:
         return action, log_prob
 
 
-class PolicyGradient:
+class AgentTrain:
     def __init__(
             self,
             actor_critic_nn, device,
             distribution, distribution_args,
             normalize_adv, returns_estimator,
-            lr, gamma, entropy, clip_grad,
+            learning_rate, gamma, entropy, clip_grad,
             gae_lambda=0.95, image_augmentation_alpha=0.0
     ):
         """
@@ -113,7 +113,7 @@ class PolicyGradient:
             self.policy_distribution.to(device)
             parameters_to_optimize = list(parameters_to_optimize) + list(self.policy_distribution.parameters())
 
-        self.opt = torch.optim.Adam(parameters_to_optimize, lr)
+        self.opt = torch.optim.Adam(parameters_to_optimize, learning_rate)
 
         self.normalize_adv = normalize_adv
         self.returns_estimator = returns_estimator

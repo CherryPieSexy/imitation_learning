@@ -1,26 +1,67 @@
+import importlib
+
 import gym
+import retro
 
 from utils.vec_env import SubprocVecEnv
 from utils.env_wrappers import (
     ContinuousActionWrapper, OneHotWrapper, ActionRepeatWrapper,
     DiePenaltyWrapper, FrameStackWrapper,
-    ImageEnvWrapper
+    ImageEnvWrapper, CustomWrapper
 )
 
 
 def init_env(
-        env_name, num_env,
-        time_limit=True,
+        env_type, env_name, env_args,
+        env_num,
+        time_unlimited=False,
         die_penalty=0,
         relax_discrete=False,
-        action_repeat=1
+        action_repeat=1,
+        image_args=None,
+        custom_wrapper_path=None,
+        custom_wrapper_args=None
 ):
-    # WARNING! Wrapper order __is__ important and __must__ be set up carefully!
-    # wrappers works like queue: first applied - first executed
-    def _init_env():
-        _env = gym.make(env_name)
+    """Function to init environment.
 
-        if not time_limit:
+    WARNING! Wrapper order __is__ important and __must__ be set up carefully!
+    wrappers works like queue: first applied - first executed
+
+    :param env_type: gym, retro, or path to any environment in form
+                     'folder.sub_folder.file', str
+    :param env_name:
+    :param env_args:
+    :param env_num: number of environments working in parallel
+    :param time_unlimited:
+    :param die_penalty:
+    :param relax_discrete:
+    :param action_repeat:
+    :param image_args: dict with keys:
+                       convert_to_gray,
+                       x_start, x_end,
+                       y_start, y_end,
+                       x_size, y_size
+    :param custom_wrapper_path:
+    :param custom_wrapper_args:
+    :return:
+    """
+    def _init_env():
+        if env_type == 'gym':
+            maker = gym.make
+            env_args['env_name'] = env_name
+        elif env_type == 'retro':
+            maker = retro.make
+            env_args['game'] = env_name
+        else:
+            module = importlib.import_module(env_type)
+            maker = getattr(module, env_name)
+
+        _env = maker(**env_args)
+
+        if custom_wrapper_path is not None:
+            _env = CustomWrapper(_env, custom_wrapper_path, custom_wrapper_args)
+
+        if time_unlimited:
             _env = _env.env
 
         if die_penalty != 0:
@@ -37,17 +78,16 @@ def init_env(
 
         # this is common for image envs
         if len(_env.observation_space.shape) == 3:
-            # _env = ImageEnvWrapper(_env, True, 0, -12, 0, -1, 42, 42)
-            _env = ImageEnvWrapper(_env, True, 0, -1, 0, -1, 96, 96)
+            _env = ImageEnvWrapper(_env, **image_args)
             _env = FrameStackWrapper(_env, 4)
 
         return _env
 
-    if num_env > 1:
-        env = SubprocVecEnv([_init_env for _ in range(num_env)])
-    elif num_env == 1:
+    if env_num > 1:
+        env = SubprocVecEnv([_init_env for _ in range(env_num)])
+    elif env_num == 1:
         env = _init_env()
     else:
-        raise ValueError(f'num_env should be >= 1, got num_env={num_env}')
+        raise ValueError(f'num_env should be >= 1, got num_env={env_num}')
 
     return env

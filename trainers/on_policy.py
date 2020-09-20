@@ -13,8 +13,9 @@ class OnPolicyTrainer(BaseTrainer):
     def __init__(
             self,
             agent_online, agent_train,
-            update_period, return_pi,
+            return_pi,
             train_env,
+            update_period,
             normalize_obs, train_obs_normalizer,
             scale_reward, normalize_reward, train_reward_normalizer,
             obs_clip, reward_clip,
@@ -22,20 +23,26 @@ class OnPolicyTrainer(BaseTrainer):
     ):
         """On-policy trainer
 
-        :param agent_online:
-        :param agent_train:
-        :param update_period:
-        :param return_pi:
-        :param train_env:
-        :param test_env:
-        :param normalize_obs:
-        :param train_obs_normalizer
-        :param scale_reward:
-        :param normalize_reward:
-        :param train_reward_normalizer
-        :param obs_clip:
-        :param reward_clip:
-        :param log_dir:
+        :param agent_online: agent which collects data
+        :param agent_train: agent which performs train-ops
+        :param return_pi: if True then 'act()' method will return
+                          full policy parametrization instead of log-prob of sampled action
+        :param train_env: environment for collecting training data
+        :param test_env: environment for testing agent once per epoch
+        :param update_period: number of train-ops after which
+                              online agent loads weights of training agent
+        :param normalize_obs: if True then observations will be normalized
+                              by running mean and std of collected observations
+        :param train_obs_normalizer: if True then running mean and std of obs_normalizer
+                                     will be updated each environment step
+        :param scale_reward: if True then reward will be normalized
+                             by running mean and std of collected episodes return
+        :param normalize_reward: if True then reward will be normalized
+                                 by running mean and std of collected rewards
+        :param train_reward_normalizer: if True then running mean and std of reward_normalizer
+                                        will be updated each environment step
+        :param obs_clip: abs(observation) will be clipped to this value after normalization
+        :param reward_clip: abs(reward) will be clipped to this value after normalization
         :param kwargs: test_env and log_dir
         """
         super().__init__(**kwargs)
@@ -240,32 +247,32 @@ class OnPolicyTrainer(BaseTrainer):
         self.save(checkpoint_name)
         self._test_agent(epoch, n_tests, self._agent_online)
 
-    def train(self, n_epoch, n_steps, rollout_len, n_tests):
+    def train(self, n_epoch, n_steps_per_epoch, rollout_len, n_tests_per_epoch):
         """
         Run training for 'n_epoch', each epoch takes 'n_steps' training steps
         on rollouts of len 'rollout_len'.
         At the end of each epoch run 'n_tests' tests and saves checkpoint
 
         :param n_epoch:
-        :param n_steps:
+        :param n_steps_per_epoch:
         :param rollout_len:
-        :param n_tests:
+        :param n_tests_per_epoch:
         :return:
         """
         observation = self._train_env.reset()
-        self._save_n_test(0, n_tests)
+        self._save_n_test(0, n_tests_per_epoch)
 
         self._agent_train.train()  # always in training mode
         for epoch in range(n_epoch):
             self._agent_online.train()
-            p_bar = trange(n_steps, ncols=90, desc=f'epoch_{epoch}')
+            p_bar = trange(n_steps_per_epoch, ncols=90, desc=f'epoch_{epoch}')
             for train_step in p_bar:
                 observation = self._train_step(
-                    observation, rollout_len, train_step + epoch * n_steps
+                    observation, rollout_len, train_step + epoch * n_steps_per_epoch
                 )
-                if (train_step + 1 + epoch * n_steps) % self._update_period == 0:
+                if (train_step + 1 + epoch * n_steps_per_epoch) % self._update_period == 0:
                     self._update_online_agent()
 
             self._update_online_agent()
-            self._save_n_test(epoch + 1, n_tests)
+            self._save_n_test(epoch + 1, n_tests_per_epoch)
         self._writer.close()

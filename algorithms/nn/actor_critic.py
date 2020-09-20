@@ -115,7 +115,7 @@ class ActorCriticCNN(nn.Module):
 
 
 class ActorCriticDeepCNN(ActorCriticCNN):
-    def __init__(self, action_size, distribution):
+    def __init__(self, action_size, distribution, dropout=0.2):
         super().__init__(action_size, distribution)
         gain = nn.init.calculate_gain('relu')
         gain_policy = 0.01
@@ -128,7 +128,7 @@ class ActorCriticDeepCNN(ActorCriticCNN):
             init(nn.Conv2d(64, 128, kernel_size=3, stride=1), gain=gain), nn.ELU(),
             init(nn.Conv2d(128, 256, kernel_size=3, stride=1), gain=gain), nn.ELU()
         )  # output shape (256, 1, 1)
-        self.fe = nn.Dropout(0.2)
+        self.fe = nn.Dropout(dropout)
         self.value = nn.Sequential(
             init(nn.Linear(256, 100), gain=gain), nn.ELU(),
             init(nn.Linear(100, 1))
@@ -141,61 +141,10 @@ class ActorCriticDeepCNN(ActorCriticCNN):
         )
 
 
-class GradientReversalLayer(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        # forward: x, backward: -x
-        return 2 * x.detach() - x
-
-
-class ModelMLP(nn.Module):
-    # predicts p(s'|s, a)
-    def __init__(
-            self,
-            observation_size, action_size, hidden_size,
-            predict_reward,
-            predict_log_sigma
-    ):
-        super().__init__()
-
-        self.predict_log_sigma = predict_log_sigma
-        self.fe = nn.Sequential(
-            nn.Linear(observation_size + action_size, hidden_size), nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size), nn.ReLU(),
-        )
-        if predict_reward:
-            observation_size += 1
-        if predict_log_sigma:
-            # predict parameters for N(mu, sigma)
-            self.last_layer = nn.Linear(hidden_size, 2 * observation_size)
-        else:
-            # predict just next state
-            self.last_layer = nn.Linear(hidden_size, observation_size)
-
-    def forward(self, observation, action):
-        x = torch.cat((observation, action), dim=-1)
-        x = self.fe(x)
-        return self.last_layer(x)
-
-
-class RolloutDiscriminator(nn.Module):
-    # predicts p(rollout ~ pi_expert)
-    def __init__(
-            self,
-            observation_size, hidden_size
-    ):
-        super().__init__()
-        self.linear_1 = nn.Sequential(
-            nn.Linear(observation_size, hidden_size), nn.Tanh()
-        )
-        self.lstm = nn.LSTM(hidden_size, hidden_size)
-        self.linear_2 = nn.Linear(hidden_size, 1)
-
-    def forward(self, observations):
-        # observations is of size (T, B, dim(obs))
-        x = self.linear_1(observations)
-        x, _ = self.lstm(x)
-        log_p_pi_expert = self.linear_2(x[-1])
-        return log_p_pi_expert
+def init_actor_critic(nn_type, nn_args):
+    neural_networks = {
+        'MLP': ActorCriticTwoMLP,
+        'CNN': ActorCriticCNN,
+        'DeepCNN': ActorCriticDeepCNN,
+    }
+    return neural_networks[nn_type](**nn_args)

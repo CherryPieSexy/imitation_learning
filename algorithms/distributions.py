@@ -65,6 +65,26 @@ class GumbelSoftmax(Categorical):
         return sample, log_prob
 
 
+class Bernoulli(Categorical):
+    def __init__(self):
+        super().__init__()
+        self.dist_fn = dist.Bernoulli
+
+    def sample(self, parameters, deterministic):
+        logits = parameters
+        distribution = self.dist_fn(logits=logits)
+        if deterministic:
+            sample = (logits > 0).to(torch.float32)
+        else:
+            sample = distribution.sample()
+        log_prob = distribution.log_prob(sample).sum(-1)
+        return sample, log_prob
+
+    def log_prob(self, parameters, sample):
+        log_prob = super().log_prob(parameters, sample)
+        return log_prob.sum(-1)
+
+
 def convert_parameters_beta(parameters):
     parameters = 1.0 + fun.softplus(parameters)
     action_size = parameters.size(-1) // 2
@@ -212,6 +232,7 @@ class Normal(TanhNormal):
 distributions_dict = {
     'Categorical': Categorical,
     'GumbelSoftmax': GumbelSoftmax,
+    'Bernoulli': Bernoulli,
     'Beta': Beta,
     'WideBeta': WideBeta,
     'TanhNormal': TanhNormal,
