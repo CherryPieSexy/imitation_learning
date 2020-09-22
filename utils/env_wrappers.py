@@ -164,7 +164,7 @@ class StateLoadWrapper(gym.Wrapper):
 
 class CustomWrapper(gym.Wrapper):
     def __init__(self, env, custom_wrapper_path, custom_wrapper_args):
-        """Custom environment wrapper which can be used with any function.
+        """Wraps environment with any wrapper outside this file
 
         :param env:
         :param custom_wrapper_path: path to function which will be applied after action execution.
@@ -173,14 +173,10 @@ class CustomWrapper(gym.Wrapper):
         super().__init__(env)
         module_import_path, class_name = custom_wrapper_path.split(':')
         module = importlib.import_module(module_import_path)
-        self.custom_wrapper = getattr(module, class_name)(**custom_wrapper_args)
+        self.custom_wrapper = getattr(module, class_name)(env, **custom_wrapper_args)
 
     def step(self, action, **kwargs):
-        observation, reward, done, info = self.env.step(action, **kwargs)
-        observation, reward, done, info = self.custom_wrapper.step(observation, reward, done, info)
-        return observation, reward, done, info
+        return self.custom_wrapper.step(action, **kwargs)
 
     def reset(self):
-        obs = self.env.reset()
-        obs = self.custom_wrapper.reset(obs)
-        return obs
+        return self.custom_wrapper.reset()

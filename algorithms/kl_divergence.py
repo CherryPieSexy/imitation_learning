@@ -13,7 +13,7 @@ def _d_kl_categorical(p, q):
 
 
 def _d_kl_bernoulli(p, q):
-    p_probs = torch.sigmoid(p)
+    p_probs = torch.clamp(torch.sigmoid(p), 0.001, 0.999)
     q_probs = torch.clamp(torch.sigmoid(q), 0.001, 0.999)
     t1 = p_probs * (p_probs / q_probs).log()
     # noinspection PyTypeChecker,PyUnresolvedReferences

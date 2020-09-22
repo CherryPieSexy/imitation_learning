@@ -7,7 +7,7 @@ import gym
 def create_log_dir(log_dir):
     # tensorboard logs saved in 'log_dir/tb/', checkpoints in 'log_dir/checkpoints'
     try:
-        os.mkdir(log_dir)
+        os.makedirs(log_dir)
         os.mkdir(log_dir + 'tb_logs')
         os.mkdir(log_dir + 'checkpoints')
     except FileExistsError:

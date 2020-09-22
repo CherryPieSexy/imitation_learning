@@ -19,6 +19,7 @@ class OnPolicyTrainer(BaseTrainer):
             normalize_obs, train_obs_normalizer,
             scale_reward, normalize_reward, train_reward_normalizer,
             obs_clip, reward_clip,
+            warm_up_steps=0,
             **kwargs
     ):
         """On-policy trainer
@@ -43,6 +44,8 @@ class OnPolicyTrainer(BaseTrainer):
                                         will be updated each environment step
         :param obs_clip: abs(observation) will be clipped to this value after normalization
         :param reward_clip: abs(reward) will be clipped to this value after normalization
+        :param warm_up_steps: number of steps not to update online agent,
+                              useful to continue training from checkpoint
         :param kwargs: test_env and log_dir
         """
         super().__init__(**kwargs)
@@ -52,6 +55,7 @@ class OnPolicyTrainer(BaseTrainer):
         self._update_online_agent()
         # weights of online agent updated once in 'update_period' & at the end of training epoch
         self._update_period = update_period
+        self._warm_up_steps = warm_up_steps
 
         # if return_pi then agent append 'policy' tensor
         # to rollout, else it append 'log_pi_a'
@@ -267,10 +271,11 @@ class OnPolicyTrainer(BaseTrainer):
             self._agent_online.train()
             p_bar = trange(n_steps_per_epoch, ncols=90, desc=f'epoch_{epoch}')
             for train_step in p_bar:
+                step = train_step + epoch * n_steps_per_epoch
                 observation = self._train_step(
-                    observation, rollout_len, train_step + epoch * n_steps_per_epoch
+                    observation, rollout_len, step
                 )
-                if (train_step + 1 + epoch * n_steps_per_epoch) % self._update_period == 0:
+                if step > self._warm_up_steps and (step + 1) % self._update_period == 0:
                     self._update_online_agent()
 
             self._update_online_agent()

@@ -1,4 +1,4 @@
-log_dir: "logs/Mario/ppo_1/"
+log_dir: "logs/Mario/ppo_2/"
 load_checkpoint: null
 
 env_type: &env_type "retro"
@@ -60,7 +60,6 @@ train_agent_args:
     entropy: 0.001
     clip_grad: 0.5
     gae_lambda: 0.95
-    image_augmentation_alpha: 0.5
 
   additional_params:  # special parameters for PPO
     rollback_alpha: 0.1
