@@ -136,7 +136,7 @@ def play_from_folder(
     policy = config['policy']
     policy_args = config['policy_args']
     agent = AgentInference(nn_online, device, policy, policy_args, testing=True)
-    agent.load(folder + checkpoint_path)
+    agent.load(folder + checkpoint_path, map_location='cpu')
     agent.eval()
     play_n_episodes(
         test_env, agent,

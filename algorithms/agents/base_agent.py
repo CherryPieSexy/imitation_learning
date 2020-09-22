@@ -34,8 +34,8 @@ class AgentInference:
         if self.distribution_with_params:
             self.distribution.load_state_dict(state['distribution'])
 
-    def load(self, filename):
-        checkpoint = torch.load(filename)
+    def load(self, filename, **kwargs):
+        checkpoint = torch.load(filename, **kwargs)
         agent_state = checkpoint['agent']
         self.load_state_dict(agent_state)
         if 'obs_normalizer' in checkpoint:
@@ -158,8 +158,8 @@ class AgentTrain:
             state_dict['reward_normalizer'] = reward_normalizer.state_dict()
         torch.save(state_dict, filename)
 
-    def load(self, filename):
-        checkpoint = torch.load(filename)
+    def load(self, filename, **kwargs):
+        checkpoint = torch.load(filename, **kwargs)
         agent_state = checkpoint['agent']
         self.load_state_dict(agent_state)
         # self.nn.load_state_dict(checkpoint['agent']['nn'])

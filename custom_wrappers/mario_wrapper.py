@@ -12,7 +12,7 @@ class MarioWrapper:
             done = True
             reward += 100
 
-        reward += (info['score'] - self.prev_score) / 10.0
+        reward += (info['score'] - self.prev_score) / 2.0
         self.prev_score = info['score']
 
         return observation, reward / 10.0, done, info

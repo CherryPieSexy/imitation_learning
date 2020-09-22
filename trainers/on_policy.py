@@ -91,9 +91,9 @@ class OnPolicyTrainer(BaseTrainer):
         checkpoint = torch.load(filename)
         self._agent_online.load_state_dict(checkpoint['agent'])
         self._agent_train.load_state_dict(checkpoint['agent'])
-        if 'obs_normalizer' in checkpoint:
+        if 'obs_normalizer' in checkpoint and self._obs_normalizer is not None:
             self._obs_normalizer.load_state_dict(checkpoint['obs_normalizer'])
-        if 'reward_normalizer' in checkpoint:
+        if 'reward_normalizer' in checkpoint and self._reward_normalizer is not None:
             self._reward_normalizer.load_state_dict(checkpoint['reward_normalizer'])
 
     @staticmethod

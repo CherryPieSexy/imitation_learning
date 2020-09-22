@@ -84,6 +84,10 @@ class Bernoulli(Categorical):
         log_prob = super().log_prob(parameters, sample)
         return log_prob.sum(-1)
 
+    def entropy(self, *args, **kwargs):
+        entropy = super().entropy(*args, **kwargs)
+        return entropy.sum(-1)
+
 
 def convert_parameters_beta(parameters):
     parameters = 1.0 + fun.softplus(parameters)
