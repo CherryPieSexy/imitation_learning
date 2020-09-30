@@ -1,3 +1,5 @@
+import importlib
+
 import torch
 import torch.nn as nn
 
@@ -56,7 +58,11 @@ class ActorCriticTwoMLP(nn.Module):
             policy = self.policy(observation)
         value = self.critic(observation).squeeze(-1)
 
-        return policy, value
+        result = {
+            'policy': policy,
+            'value': value,
+        }
+        return result
 
 
 class ActorCriticCNN(nn.Module):
@@ -80,6 +86,8 @@ class ActorCriticCNN(nn.Module):
 
         if distribution in ['Beta', 'TanhNormal', 'Normal']:
             action_size *= 2
+        elif distribution == 'RealNVP':
+            gain_policy = gain
 
         self.policy = init(nn.Linear(hidden_size, action_size), gain=gain_policy)
         self.value = init(nn.Linear(hidden_size, 1))
@@ -111,7 +119,11 @@ class ActorCriticCNN(nn.Module):
     def forward(self, observation):
         flatten = self._cnn_forward(observation)
         policy, value = self._mlp_forward(flatten)
-        return policy, value
+        result = {
+            'policy': policy,
+            'value': value,
+        }
+        return result
 
 
 class ActorCriticDeepCNN(ActorCriticCNN):
@@ -142,9 +154,23 @@ class ActorCriticDeepCNN(ActorCriticCNN):
 
 
 def init_actor_critic(nn_type, nn_args):
+    """
+
+    :param nn_type: one from {'MLP', 'CNN', 'DeepCNN'}
+                    or path + class in format 'algorithms.nn.impala:ImpalaCNN',
+                    works with python modules
+    :param nn_args: arguments for nn
+    :return: initialized actor-critic neural network
+    """
     neural_networks = {
         'MLP': ActorCriticTwoMLP,
         'CNN': ActorCriticCNN,
         'DeepCNN': ActorCriticDeepCNN,
     }
-    return neural_networks[nn_type](**nn_args)
+    if nn_type in neural_networks:
+        nn_init_fn = neural_networks[nn_type]
+    else:
+        module_import_path, class_name = nn_type.split(':')
+        module = importlib.import_module(module_import_path)
+        nn_init_fn = getattr(module, class_name)
+    return nn_init_fn(**nn_args)

@@ -4,12 +4,16 @@ import torch
 from torch.utils.data import Dataset
 
 from algorithms.agents.base_agent import AgentTrain
+from algorithms.distributions import continuous_distributions
 
 
 class BehaviorCloning(AgentTrain):
     def __init__(self, *args, loss_type='mse', **kwargs):
         assert loss_type in ['mse', 'likelihood']
         if loss_type == 'mse':
+            # this loss supported only for continuous distributions
+            assert self.policy_distribution_str in continuous_distributions, \
+                'mse loss supported only for continuous distributions'
             self._loss_fn = self._mean_loss
         else:
             self._loss_fn = self._log_prob_loss
@@ -19,7 +23,8 @@ class BehaviorCloning(AgentTrain):
         return x.to(torch.float32).to(self.device)
 
     def _mean_loss(self, policy, actions):
-        mean, _ = self.policy_distribution.sample(policy, deterministic=True)
+        # I hope this have some meaning
+        mean, _ = self.policy_distribution.mean(policy)
         loss = 0.5 * (mean - actions) ** 2
         return loss
 
@@ -34,8 +39,8 @@ class BehaviorCloning(AgentTrain):
         observations = self.to_tensor(observations).unsqueeze(1)
         actions = self.to_tensor(actions).unsqueeze(1)
 
-        policy, _ = self.actor_critic_nn(observations)
-
+        nn_result = self.actor_critic_nn(observations)
+        policy = nn_result['policy']
         loss = self._loss_fn(policy, actions).mean()
 
         grad_norm = self._optimize_loss(loss)

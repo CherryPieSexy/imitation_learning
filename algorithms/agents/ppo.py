@@ -100,39 +100,39 @@ class PPO(AgentTrain):
         )
         return policy_loss
 
-    def _clipped_value_loss(self, values_old, values, returns):
+    def _clipped_value_loss(self, value_old, value, returns):
         # clipped value loss, PPO-style
-        clipped_value = values_old + torch.clamp(
-            (values - values_old), -self.ppo_epsilon, self.ppo_epsilon
+        clipped_value = value_old + torch.clamp(
+            (value - value_old), -self.ppo_epsilon, self.ppo_epsilon
         )
 
-        surrogate_1 = (values - returns) ** 2
+        surrogate_1 = (value - returns) ** 2
         surrogate_2 = (clipped_value - returns) ** 2
 
         value_loss = 0.5 * torch.max(surrogate_1, surrogate_2)
         return value_loss.mean()
 
     @staticmethod
-    def _mse_value_loss(values, returns):
+    def _mse_value_loss(value, returns):
         # simple MSE loss, works better than clipped PPO-style
-        value_loss = 0.5 * ((values - returns) ** 2)
+        value_loss = 0.5 * ((value - returns) ** 2)
         return value_loss.mean()
 
-    def _value_loss(self, values_old, values, returns):
+    def _value_loss(self, value_old, value, returns):
         if self.use_ppo_value_loss:
-            value_loss = self._clipped_value_loss(values_old, values, returns)
+            value_loss = self._clipped_value_loss(value_old, value, returns)
         else:
-            value_loss = self._mse_value_loss(values, returns)
+            value_loss = self._mse_value_loss(value, returns)
         return value_loss
 
     def _calc_losses(
             self,
             policy_old,
-            policy, values, actions,
+            policy, value, actions,
             returns, advantage
     ):
-        # value_loss = self._value_loss(values_old, values, returns)
-        value_loss = self._mse_value_loss(values, returns)
+        # value_loss = self._value_loss(value_old, value, returns)
+        value_loss = self._mse_value_loss(value, returns)
         policy_loss = self._policy_loss(policy_old, policy, actions, advantage)
         entropy = self.policy_distribution.entropy(policy, actions).mean()
         loss = value_loss - policy_loss - self.entropy * entropy
@@ -157,7 +157,8 @@ class PPO(AgentTrain):
             # here we can call nn.forward(...) only on interesting data
             # observations[row, col] has only batch dimension =>
             # need to unsqueeze and squeeze back
-            policy, value = self.actor_critic_nn(observations[row, col].unsqueeze(0))
+            nn_result = self.actor_critic_nn(observations[row, col].unsqueeze(0))
+            policy, value = nn_result['policy'], nn_result['value']
             policy, value = policy.squeeze(0), value.squeeze(0)
 
         # 2) calculate losses
@@ -234,6 +235,13 @@ class PPO(AgentTrain):
 
     def _train_fn(self, rollout):
         """
+        It may look a little bit complicated and unreasonable
+        to make this method perform several training epoch
+        instead of call 'agent._train_on_rollout(...)' outside several times,
+        but with this approach I have to put rollout on device and
+        compute returns and advantage only once (if option 'recompute_advantage' is disabled),
+        which is slow with current GAE.
+
         :param rollout: tuple (observations, actions, rewards, is_done, log_probs),
                where each one is np.array of shape [time, batch, ...] except observations,
                observations of shape [time + 1, batch, ...]

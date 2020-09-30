@@ -48,7 +48,7 @@ def init_env(
     def _init_env():
         if env_type == 'gym':
             maker = gym.make
-            env_args['env_name'] = env_name
+            env_args['id'] = env_name
         elif env_type == 'retro':
             maker = retro.make
             env_args['game'] = env_name

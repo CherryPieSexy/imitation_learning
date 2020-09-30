@@ -111,15 +111,6 @@ class OnPolicyTrainer(BaseTrainer):
             stacked_info[key] = np.stack(values)
         return stacked_info
 
-    # def _act(self, fake_agent, observation, deterministic, training=False, **kwargs):
-    #     # 'fake_agent' arg is unused to make this method work in BaseTrainer.test_agent_service
-    #     observation = self._normalize_observation(observation, training)
-    #     (action, log_prob), act_time = super()._act(
-    #         self._agent_online, observation, deterministic,
-    #         return_pi=self._return_pi
-    #     )
-    #     return (action, log_prob), act_time
-
     def _act(self, fake_agent, observation, deterministic, need_norm=True, **kwargs):
         # this method used ONLY inside base class '._test_agent_service()' method
         # 'fake_agent' arg is unused to make this method work in BaseTrainer.test_agent_service
@@ -246,11 +237,6 @@ class OnPolicyTrainer(BaseTrainer):
     def _update_online_agent(self):
         self._agent_online.load_state_dict(self._agent_train.state_dict())
 
-    def _save_n_test(self, epoch, n_tests):
-        checkpoint_name = self._log_dir + 'checkpoints/' + f'epoch_{epoch}.pth'
-        self.save(checkpoint_name)
-        self._test_agent(epoch, n_tests, self._agent_online)
-
     def train(self, n_epoch, n_steps_per_epoch, rollout_len, n_tests_per_epoch):
         """
         Run training for 'n_epoch', each epoch takes 'n_steps' training steps
@@ -264,7 +250,7 @@ class OnPolicyTrainer(BaseTrainer):
         :return:
         """
         observation = self._train_env.reset()
-        self._save_n_test(0, n_tests_per_epoch)
+        self._save_n_test(0, n_tests_per_epoch, self._agent_online)
 
         self._agent_train.train()  # always in training mode
         for epoch in range(n_epoch):
@@ -279,5 +265,5 @@ class OnPolicyTrainer(BaseTrainer):
                     self._update_online_agent()
 
             self._update_online_agent()
-            self._save_n_test(epoch + 1, n_tests_per_epoch)
+            self._save_n_test(epoch + 1, n_tests_per_epoch, self._agent_online)
         self._writer.close()

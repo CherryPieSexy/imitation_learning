@@ -1,4 +1,4 @@
-log_dir: "logs/CartPole/vmpo/exp_0/"
+log_dir: "logs/cartpole/vmpo/"
 load_checkpoint: null
 
 env_type: &env_type "gym"

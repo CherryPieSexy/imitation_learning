@@ -8,19 +8,19 @@ class A2C(AgentTrain):
     loss-function and how to call it
     """
 
-    def _policy_loss(self, policy, actions, advantages):
+    def _policy_loss(self, policy, actions, advantage):
         log_pi_for_actions = self.policy_distribution.log_prob(policy, actions)
-        policy_loss = log_pi_for_actions * advantages.detach()
+        policy_loss = log_pi_for_actions * advantage.detach()
         return policy_loss.mean()
 
-    def _main(self, observations, policy, values, actions, returns, advantages):
-        value_loss = 0.5 * ((values - returns) ** 2).mean()
+    def _main(self, observations, policy, value, actions, returns, advantages):
+        value_loss = 0.5 * ((value - returns) ** 2).mean()
         policy_loss = self._policy_loss(policy, actions, advantages)
         entropy = self.policy_distribution.entropy(policy).mean()
         loss = value_loss - policy_loss - self.entropy * entropy
         if self.image_augmentation_alpha > 0.0:
             (policy_div, value_div), img_aug_time = self._augmentation_loss(
-                policy.detach(), values.detach(), observations
+                policy.detach(), value.detach(), observations
             )
             loss += self.image_augmentation_alpha * (policy_div + value_div)
             upd = {
@@ -56,9 +56,9 @@ class A2C(AgentTrain):
         # 'done' converts into 'not_done' inside '_rollout_to_tensors' method
         observations, actions, rewards, not_done, _ = self._rollout_to_tensors(rollout)
 
-        policy, values, returns, advantage = self._compute_returns(observations, rewards, not_done)
+        policy, value, returns, advantage = self._compute_returns(observations, rewards, not_done)
 
-        result_log = self._main(observations, policy, values, actions, returns, advantage)
+        result_log = self._main(observations, policy, value, actions, returns, advantage)
         time_log = dict()
         if self.image_augmentation_alpha > 0.0:
             time_log['img_aug'] = result_log.pop('img_aug_time')

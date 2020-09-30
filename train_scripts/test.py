@@ -33,7 +33,10 @@ def play_episode(
         if pause:  # useful to start 'Kazam', select window and record video
             input("press 'enter' to continue...")
     while not done:
-        action = agent.act(obs, deterministic=deterministic)
+        # agent always takes observation with [time, batch, *dim(obs)] size as input
+        # and returns action and log-prob with corresponding size
+        action, _ = agent.act([[obs]], deterministic=deterministic)
+        action = action.cpu().numpy()[0, 0]
         obs, reward, done, info = env.step(action, render=not silent)
         episode_reward += reward
         episode_len += 1
@@ -42,9 +45,6 @@ def play_episode(
         actions.append(action)
         rewards.append(reward)
 
-        # if info['flag_get']:
-        #     from time import sleep
-        #     sleep(100500)
     if not silent:
         env.render()
 
@@ -135,7 +135,7 @@ def play_from_folder(
     nn_online.to(device)
     policy = config['policy']
     policy_args = config['policy_args']
-    agent = AgentInference(nn_online, device, policy, policy_args, testing=True)
+    agent = AgentInference(nn_online, device, policy, policy_args)
     agent.load(folder + checkpoint_path, map_location='cpu')
     agent.eval()
     play_n_episodes(

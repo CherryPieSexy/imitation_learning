@@ -36,8 +36,8 @@ class BehaviorCloningTrainer(BaseTrainer):
         self._write_logs('train/', train_logs, step)
         self._write_logs('time/', time_logs, step)
 
-    def train(self, n_epoch, n_tests):
-        self._test_agent(0, n_tests, self._agent)
+    def train(self, n_epoch, n_tests_per_epoch):
+        self._save_n_test(0, n_tests_per_epoch, self._agent)
         train_step = 0
 
         for epoch in range(n_epoch):
@@ -45,7 +45,5 @@ class BehaviorCloningTrainer(BaseTrainer):
             for batch in tqdm(self._demo_buffer, ncols=90, desc=f'epoch_{epoch}'):
                 self._train_step(batch, train_step)
                 train_step += 1
-            checkpoint_name = self._log_dir + 'checkpoints/' + f'epoch_{epoch}.pth'
-            self.save(checkpoint_name)
-            self._test_agent(epoch + 1, n_tests, self._agent)
+            self._save_n_test(epoch + 1, n_tests_per_epoch, self._agent)
         self._writer.close()

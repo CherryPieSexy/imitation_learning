@@ -17,24 +17,20 @@ and model-free methods would be used only at the beginning to train 'experts'.
 However, it appeared that PPO implementation (and its tricks) took more time than I expected. 
 As the result now most of the code is related to PPO, but I am still interested in Imitation Learning and going to add several related algorithms.
 
-Also I found that PPO works remarkably well, better than reported in papers. 
-For example, I was able to train Humanoid to run for 
-~11.500 reward points in 2 hours on laptop without GPU, using only ~8 million environment transitions.
-
 ## Current Functionality
 
-For now this repo contains some model-free on-policy algorithm implementations: A2C, PPO, V-MPO. 
-Each algorithm supports discrete (Categorical, GumbelSoftmax) and continuous (Beta, Normal, tanh(Normal), RealNVP) policy distributions, 
+For now this repo contains some model-free on-policy algorithm implementations: A2C, PPO, V-MPO and BC. 
+Each algorithm supports discrete (Categorical, Bernoulli, GumbelSoftmax) and continuous (Beta, Normal, tanh(Normal), RealNVP) policy distributions, 
 and vector or image observation environments. Beta and tanh(Normal) works best in my experiments (tested on BipedalWalker and Humanoid environments).
 
 As found in paper [*Implementation Matters*](https://arxiv.org/abs/2005.12729), 
 PPO algo works mostly because of "code-level" optimizations. Here I implemented most of them:
-- [x] Value function clipping
+- [ ] Value function clipping (works better without it, not supported now)
 - [x] Observation normalization & clipping
 - [x] Reward scaling & clipping (in my experiments normalization works better compared to scaling)
 - [x] Orthogonal initialization of neural network weights
 - [x] Gradient clipping
-- [ ] Learning rate annealing (will be added soon)
+- [ ] Learning rate annealing (will be added)
 
 In addition, I implemented roll-back loss from [*Truly PPO paper*](https://arxiv.org/abs/1903.07940), which works very well, 
 and 'advantage-recompute' option from [*A Large-Scale Empirical Study of PPO paper*](https://arxiv.org/abs/2006.05990). 
@@ -43,57 +39,73 @@ For image-observation environments I added special regularization similar to [*C
 but instead of contrastive loss between features from convolutional feature extractor, 
 I directly minimize D_KL between policies on augmented and non-augmented images.
 
-As for Imitation Learning algorithms, there is only Behavior Cloning for now, but more will be added soon.
+As for Imitation Learning algorithms, there is only Behavior Cloning for now, but more will be added.
 
 #### Code structure
     .
     ├── algorithms
-        ├── agents        # A2C, PPO, V-MPO, BC, any different algo...
-        └── ...           # all different algorithm parts: neural networks, probability distributions, etc
-    ├── experts           # checkpoints of trained models, just some *.pth files with nn model description and weights inside
+        ├── agents              # A2C, PPO, V-MPO, BC, any different agent algo...
+        └── ...                 # all different algorithm parts: neural networks, probability distributions, etc
+    ├── experts                 # checkpoints of trained models, just some *.pth files with nn model description and weights inside
     ├── train_scripts
-        ├── train_ppo.py  # script for trainging PPO algorithm
-        ├── ...           # training scripts for different algorithms
-        └── configs       # sh scripts (configs) to train an algorithm.
-    ├── trainers          # implementation of trainers for different algo. Trainer is a manager that controls data-collection, model optimization and testing, etc.
-    ├── utils             # all other 'support' functions that does not fit in any other folder.
+        ├── train_on_policy.py  # script for trainging an on-policy algorithm
+        ├── train_bc.py         # script to train policy with behavior cloning
+        ├── test.py             # script for testing trained agent
+        └── configs             # folder with .yaml configs to trian agents
+    ├── trainers                # implementation of trainers for different algorithms. Trainer is a manager that controls data-collection, model optimization and testing, etc.
+    ├── utils                   # all other 'support' functions that does not fit in any other folder.
 
 #### Training example
-Example of training config of PPO algo on CartPole-v1 env:
-```bash
+Each experiment requires yaml config, look at examples here: [folder](train_scripts/configs).
 
-python3 train_scripts/train_ppo.py
---log_dir "logs/CartPole/"                                 # directory where logs will be stored
---env_name CartPole-v1                                     # name of the environment to train on
---action_repeat 1 --train_env_num 4 --test_env_num 4 \     # environment parameters
---hidden_size 64 --device_online cpu --device_train cpu \  # actor-critic hidden size and devices for data-collecting model and training model
---policy Categorical \                                     # policy distribution type
---returns_estimator '1-step' \                             # algo to estimate returns. Choose from '1-step', 'n-step', 'gae'
---learning_rate 1e-3 --gamma 0.99 --entropy 1e-3 \         # training hyperparameters
---clip_grad 0.5 --gae_lambda 0.95 \
---ppo_epsilon 0.1 --rollback_alpha 0.05 \                  # PPO hyperparameters
---ppo_n_epoch 4 --ppo_n_mini_batches 2 \
---n_epoch 10 --n_step_per_epoch 200 \                      # training parameters: number of epoch, epoch size, rollout size
---rollout_len 10 --n_tests_per_epoch 20
+Example of training PPO agent on CartPole-v1 env:
+```bash
+python train_scripts/train_on_policy.py -c train_scripts/configs/cartpole/ppo.yaml
 ```
 
-To see all the available options write ```python train_scripts/train_ppo.py -h``` in the terminal.
+Training results (including training config, tensorboard logs and model checkpoints) will be saved in ```--log_dir``` folder.
 
 Obtained policy: 
 
 ![cartpole](gifs/cartpole.gif)
 
-Training results (including training config, tensorboard logs and model checkpoints) will be saved in ```--log_dir``` folder.
+To train on custom environment (with gym interface) add in yaml config env type and name:
+```yaml
+env_type: 'gym.envs.classic_control.cartpole' # path to file with the environment class or installed python module
+env_name: 'CartPoleEnv'  # the environment class name
+env_args: {}  # dict with environment arguments, in this case it is empty
+```
+Similar functionality exists for custom env wrapper and neural network. To learn about available parameters for algorithms/trainers look into their docstrings.
 
 #### Testing example
 Results of trained policy may be shown with ```train_scripts/test.py``` script. 
 This script is able to: 
 - just show how policy acts in environment
 - measure mean reward and episode len over some number of episodes
-- record gif of policy playing episode (will be added soon)
+- record gif of policy playing episode (will be added)
 - record demo file with trajectories
 
 Type ```python train_scripts/test.py -h``` in the terminal to see how to use it.
+
+#### Behavior Cloning example
+Demo file for BC is expected to be .pickle with episodes list inside. 
+An episode is a list of is \[observations, actions, rewards\], where observations = \[obs_0, obs_1, ..., obs_T\], 
+similar with action and rewards.
+
+- Record demo file from trained policy: 
+    ```bash
+    python train_scripts/test.py -f logs/cartpole/ppo/ -p checkpoints/epoch_10.pth -n 10 -r -d demo_files/cartpole_demo_10_ep.pickle -t -1
+    ```
+- Prepare config to train BC: [config](train_scripts/configs/cartpole/bc.yaml)
+- Run BC training script: 
+    ```bash
+    python train_scripts/train_bc.py -c train_scripts/configs/cartpole/bc.yaml
+    ```
+- ???
+- Enjoy policy:
+    ```bash
+    python train_scripts/test.py -f logs/cartpole/bc/ -p checkpoints/epoch_6.pth -n 10 -r
+    ```
 
 #### Trained environments
 GIFs of some of results:
@@ -106,6 +118,9 @@ Humanoid-v3: mean reward ~11.3k, 14 fails over 1000 episodes, [config](train_scr
 
 ![humanoid](./gifs/humanoid.gif)
 
+Experiments with Humanoid done in mujoco v2 
+which have integration bug that makes environment easier. For academic purposes it is correct to use version of mujoco for Humanoid is 1.5
+
 CarRacing-v0: mean reward = 894 ± 32, 26 fails over 100 episodes 
 (episode is considered failed if reward < 900), 
 [config](train_scripts/configs/ppo_carracing.sh) 
@@ -113,24 +128,22 @@ CarRacing-v0: mean reward = 894 ± 32, 26 fails over 100 episodes
 ![carracing](./gifs/carracing.gif)
 
 ## Current issues
+V-MPO implementation trains slower than A2C. Probably because of not optimal hyper-parameters sampling, need to investigate.
+
 PPO training is not stable enough: it focusing on _local_ reward, not in global episode return for some reason. 
 It means that Bipedal, Humanoid and Car mostly improve their speed 
 and don't care about falling on the ground or driving off the track. 
 However, maximum reward is kinda stable - I can obtain ~10-11k max reward on Humanoid-v3 after 2 training epoch.
 
-RealNVP converges too fast and exploration becomes too small to improve further. 
-Tining entropy regularization is difficult: too low entropy coefficient makes no difference, 
-with too high values agent optimize only entropy.
+RealNVP converges too fast and exploration becomes too small to find better reward and improve policy further. 
+Tuning entropy regularization is difficult: with too low entropy coefficient agent learns and converges same, 
+but with too high values agent optimizes only entropy.
 
 Entropy calculation for squeezed distribution (tanh(Normal) and RealNVP) possibly coded wrong, need to be checked. 
 
-GPU support is not tested yet
-
 ## Further plans
-- Test PPO on more environments
 - Add logging where it is possible
 - Add Motion Imitation [*DeepMimic paper*](https://arxiv.org/abs/1804.02717) algo
 - Add self-play trainer with PPO as backbone algo
-- Switch to more convenient configs (yaml?)
 - Support recurrent policies models and training
 - ...

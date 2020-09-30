@@ -2,14 +2,12 @@ atari-py
 Box2D
 gym
 imageio
-mujoco-py
 numpy
 opencv-python
 Pillow
 pyglet
 scipy
 six
-tensorboardX
 torch
 tqdm
 gym-retro

@@ -53,8 +53,8 @@ def main(args):
     agent_train = agent_class(
         nn_train, device_train,
         policy, policy_args,
-        train_agent_args['normalize_advantage'],
-        train_agent_args['returns_estimator'],
+        normalize_adv=train_agent_args['normalize_advantage'],
+        returns_estimator=train_agent_args['returns_estimator'],
         **optimization_params, **additional_params
     )
 

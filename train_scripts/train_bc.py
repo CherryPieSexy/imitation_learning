@@ -7,36 +7,48 @@ import argparse
 
 from utils.init_env import init_env
 from utils.utils import create_log_dir
+from algorithms.nn.actor_critic import init_actor_critic
 from algorithms.agents.bc import BehaviorCloning, BCDataSet
 from trainers.behavior_cloning import BehaviorCloningTrainer
 
 
 def main(args):
+    # init env
     test_env_args = args['test_env_args']
     test_env = init_env(**test_env_args)
 
-    # init agent
+    # init net and agent
     device_train = torch.device(args['device_train'])
     nn_train = init_actor_critic(args['actor_critic_nn_type'], args['actor_critic_nn_args'])
+    nn_train.to(device_train)
+    policy = args['policy']
+    policy_args = args['policy_args']
+
+    train_agent_args = args['train_agent_args']
+    optimization_params = train_agent_args['optimization_params']
+    additional_params = train_agent_args['additional_params']
+
     agent = BehaviorCloning(
-        image_env,
-        observation_size, action_size, args.hidden_size,
-        device, args.policy,
-        lr=args.learning_rate, clip_grad=args.clip_grad,
-        normalize_adv=None,
-        returns_estimator=None,
-        gamma=None, entropy=None
+        nn_train, device_train, policy, policy_args,
+        **optimization_params, **additional_params
     )
 
     # init demo buffer
-    demo_data = BCDataSet(args.demo_file)
-    demo_buffer = DataLoader(demo_data, args.batch_size, shuffle=True)
+    demo_data = BCDataSet(args['demo_file'])
+    demo_buffer = DataLoader(demo_data, args['batch_size'], shuffle=True)
 
     # init trainer and train
-    trainer = BehaviorCloningTrainer(agent, test_env, demo_buffer, args.log_dir)
-    if args.load_checkpoint is not None:
+    trainer = BehaviorCloningTrainer(
+        agent, demo_buffer,
+        test_env=test_env,
+        log_dir=args['log_dir']
+    )
+    if args['load_checkpoint'] is not None:
         trainer.load(args.load_checkpoint)
-    trainer.train(args.n_epoch, args.n_tests_per_epoch)
+
+    training_args = args['training_args']
+    trainer.train(**training_args)
+
     test_env.close()
 
 

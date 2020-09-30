@@ -1,4 +1,3 @@
-# base class for policy gradient algorithms
 import numpy as np
 import torch
 from torch.nn.utils import clip_grad_norm_
@@ -15,8 +14,7 @@ class AgentInference:
             self,
             nn, device,
             distribution,
-            distribution_args,
-            testing=False
+            distribution_args
     ):
         self.nn = nn
         self.device = device
@@ -27,7 +25,6 @@ class AgentInference:
             self.distribution_with_params = True
             self.distribution.to(device)
         self.obs_normalizer = None
-        self.testing = testing
 
     def load_state_dict(self, state):
         self.nn.load_state_dict(state['nn'])
@@ -53,7 +50,8 @@ class AgentInference:
             mean, var = self.obs_normalizer.mean, self.obs_normalizer.var
             observations = (observations - mean) / np.sqrt(var + 1e-8)
         with torch.no_grad():
-            policy, _ = self.nn(torch.tensor(observations, dtype=torch.float32, device=self.device))
+            nn_result = self.nn(torch.tensor(observations, dtype=torch.float32, device=self.device))
+            policy = nn_result['policy']
             # RealNVP requires 'no_grad' here
             action, log_prob = self.distribution.sample(policy, deterministic)
         if return_pi:
@@ -68,21 +66,18 @@ class AgentInference:
         :param deterministic: True or False
         :return: action and log_prob during data gathering for training, just action during testing
         """
-        if self.testing:
-            observations = [[observations]]
         action, log_prob = self._act(observations, return_pi, deterministic)
-        if self.testing:
-            return action.cpu().numpy()[0, 0]
         return action, log_prob
 
 
+# base class trainable agents
 class AgentTrain:
     def __init__(
             self,
             actor_critic_nn, device,
             distribution, distribution_args,
-            normalize_adv, returns_estimator,
             learning_rate, gamma, entropy, clip_grad,
+            normalize_adv=False, returns_estimator=None,
             gae_lambda=0.95, image_augmentation_alpha=0.0
     ):
         """
@@ -178,9 +173,10 @@ class AgentTrain:
         :param deterministic: True or False
         :return: action and log_prob, both torch.Tensor with shape = [T, B, ...], with gradients
         """
-        policy, _ = self.actor_critic_nn(
+        nn_result = self.actor_critic_nn(
             torch.tensor(observations, dtype=torch.float32, device=self.device)
         )
+        policy = nn_result['policy']
         action, log_prob = self.policy_distribution.sample(policy, deterministic)
         # we can not use 'action.cpu().numpy()' here, because we want action to have gradient
         if return_pi:
@@ -188,13 +184,13 @@ class AgentTrain:
         else:
             return action, log_prob
 
-    def _one_step_returns(self, next_values, rewards, not_done):
-        returns = rewards + self.gamma * not_done * next_values
+    def _one_step_returns(self, next_value, rewards, not_done):
+        returns = rewards + self.gamma * not_done * next_value
         return returns
 
-    def _n_step_returns(self, next_values, rewards, not_done):
+    def _n_step_returns(self, next_value, rewards, not_done):
         rollout_len = rewards.size(0)
-        last_value = next_values[-1]
+        last_value = next_value[-1]
         returns = []
         for t in reversed(range(rollout_len)):
             last_value = rewards[t] + self.gamma * not_done[t] * last_value
@@ -202,36 +198,36 @@ class AgentTrain:
         returns = torch.stack(returns[::-1])
         return returns
 
-    def _gae(self, values, next_values, rewards, not_done):
+    def _gae(self, value, next_value, rewards, not_done):
         rollout_len = rewards.size(0)
-        values = torch.cat([values, next_values[-1:]], dim=0)
+        value = torch.cat([value, next_value[-1:]], dim=0)
         gae = 0
         returns = []
         for t in reversed(range(rollout_len)):
-            delta = rewards[t] + self.gamma * not_done[t] * values[t + 1] - values[t]
+            delta = rewards[t] + self.gamma * not_done[t] * value[t + 1] - value[t]
             gae = delta + self.gamma * self.gae_lambda * not_done[t] * gae
-            returns.append(gae + values[t])
+            returns.append(gae + value[t])
         returns = torch.stack(returns[::-1])
         return returns
 
-    def _estimate_returns(self, values, next_values, rewards, not_done):
+    def _estimate_returns(self, value, next_value, rewards, not_done):
         with torch.no_grad():  # returns should not have gradients in any case!
             if self.returns_estimator == '1-step':
-                returns = self._one_step_returns(next_values, rewards, not_done)
+                returns = self._one_step_returns(next_value, rewards, not_done)
             elif self.returns_estimator == 'n-step':
-                returns = self._n_step_returns(next_values, rewards, not_done)
+                returns = self._n_step_returns(next_value, rewards, not_done)
             elif self.returns_estimator == 'gae':
-                returns = self._gae(values, next_values, rewards, not_done)
+                returns = self._gae(value, next_value, rewards, not_done)
             else:
                 raise ValueError('unknown returns estimator')
         return returns.detach()
 
     @staticmethod
-    def _normalize_advantages(advantages):
+    def _normalize_advantage(advantage):
         # advantages normalized across batch dimension, I think this is correct
-        mean = advantages.mean(dim=1, keepdim=True)
-        std = advantages.std(dim=1, keepdim=True)
-        advantages = (advantages - mean) / (std + 1e-8)
+        mean = advantage.mean(dim=1, keepdim=True)
+        std = advantage.std(dim=1, keepdim=True)
+        advantages = (advantage - mean) / (std + 1e-8)
         return advantages
 
     def _optimize_loss(self, loss):
@@ -244,14 +240,17 @@ class AgentTrain:
         return gradient_norm
 
     def _compute_returns(self, observations, rewards, not_done):
-        policy, value = self.actor_critic_nn(observations)
+        # TODO: better name for this function.
+        #  It not only compute returns, but call nn and compute advantage
+        nn_result = self.actor_critic_nn(observations)
+        policy, value = nn_result['policy'], nn_result['value']
         policy = policy[:-1]
         value, next_value = value[:-1], value[1:].detach()
 
         returns = self._estimate_returns(value, next_value, rewards, not_done)
         advantage = (returns - value).detach()
         if self.normalize_adv:
-            advantage = self._normalize_advantages(advantage)
+            advantage = self._normalize_advantage(advantage)
         return policy, value, returns, advantage
 
     def to_tensor(self, x):
@@ -268,7 +267,8 @@ class AgentTrain:
     @time_it
     def _augmentation_loss(self, policy, value, observations):
         observations_aug = batch_crop(observations)
-        policy_aug, value_aug = self.actor_critic_nn(observations_aug)
+        nn_result = self.actor_critic_nn(observations_aug)
+        policy_aug, value_aug = nn_result['policy'], nn_result['value']
         policy_div = kl_divergence(self.policy_distribution_str, policy, policy_aug).mean()
         value_div = 0.5 * ((value - value_aug) ** 2).mean()
         return policy_div, value_div

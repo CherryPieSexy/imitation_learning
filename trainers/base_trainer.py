@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 from utils.utils import time_it
 
@@ -12,12 +12,17 @@ class BaseTrainer:
         self._log_dir = log_dir
         self._writer = SummaryWriter(log_dir + 'tb_logs/')
 
+    def save(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def load(self, *args, **kwargs):
+        raise NotImplementedError
+
     @staticmethod
     @time_it
     def _act(
             agent, observation, deterministic,
-            return_pi=False, require_grad=False,
-            to_numpy=True
+            return_pi=False
     ):
         """Method to get an action from the agent.
 
@@ -25,20 +30,17 @@ class BaseTrainer:
         :param observation: np.array of batch of observations, shape [Batch, dim(obs)]
         :param deterministic: if True then action will be chosen as policy mean
         :param return_pi: default to False, if True then returns full policy parameters
-        :param require_grad: default to False, if True then action will have gradients
-        :param to_numpy: defaults to True, if False then return
-                         action and log-prob as 'torch.tensor' instances
         :return: action and log-prob of action or full policy parameters
         """
 
-        if require_grad:
+        # This function used to generate rollouts,
+        # so it always takes observation without time dimension as input.
+        # Because of that I have to unsqueeze input and squeeze action and log-prob back.
+        with torch.no_grad():
             action, log_prob = agent.act([observation], return_pi, deterministic)
-        else:
-            with torch.no_grad():
-                action, log_prob = agent.act([observation], return_pi, deterministic)
         action, log_prob = action[0], log_prob[0]
-        if to_numpy:
-            action, log_prob = action.cpu().numpy(), log_prob.cpu().numpy()
+
+        action, log_prob = action.cpu().numpy(), log_prob.cpu().numpy()
         return action, log_prob
 
     @staticmethod
@@ -89,3 +91,8 @@ class BaseTrainer:
         test_result, test_time = self._test_agent_service(n_tests, agent, deterministic)
         test_result['test_time'] = test_time
         self._write_logs('test/', test_result, step)
+
+    def _save_n_test(self, epoch, n_tests, agent):
+        checkpoint_name = self._log_dir + 'checkpoints/' + f'epoch_{epoch}.pth'
+        self.save(checkpoint_name)
+        self._test_agent(epoch, n_tests, agent)

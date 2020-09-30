@@ -136,6 +136,9 @@ class RealNVP(nn.Module):
         log_prob = distribution.log_prob(epsilon).sum(-1)
         return epsilon, log_prob
 
+    def mean(self, state_info):
+        return self.sample(state_info, True)
+
     def _prior_log_prob(self, epsilon):
         distribution = self.prior_fn(
             self.prior_mean, self.prior_log_sigma.exp()

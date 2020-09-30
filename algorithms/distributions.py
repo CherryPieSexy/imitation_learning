@@ -117,6 +117,11 @@ class Beta(Distribution):
         action = (action + 1.0) / 2.0
         return action
 
+    def mean(self, parameters):
+        alpha, beta = self._convert_parameters(parameters)
+        mean = alpha / (alpha + beta)
+        return mean
+
     def sample(self, parameters, deterministic):
         alpha, beta = self._convert_parameters(parameters)
         distribution = self.dist_fn(alpha, beta)
@@ -190,6 +195,10 @@ class TanhNormal(Distribution):
         action = 0.5 * torch.log(action)
         return action
 
+    def mean(self, parameters):
+        mean, _ = self._convert_parameters(parameters)
+        return mean
+
     def sample(self, parameters, deterministic):
         mean, sigma = self._convert_parameters(parameters)
         distribution = self.dist_fn(mean, sigma)
@@ -243,3 +252,6 @@ distributions_dict = {
     'Normal': Normal,
     'RealNVP': RealNVP
 }
+
+# truly continuous
+continuous_distributions = ['Beta', 'WideBeta', 'Normal', 'TanhNormal', 'RealNVP']

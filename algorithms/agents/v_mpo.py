@@ -113,8 +113,8 @@ class VMPO(AgentTrain):
             raise ValueError
         return alpha_loss.mean(), d_kl.mean()
 
-    def _main(self, observations, policy_old, policy, values, actions, returns, advantage):
-        # 1) select top-half of advantages and corresponding indices
+    def _main(self, observations, policy_old, policy, value, actions, returns, advantage):
+        # 1) select top-half of advantage and corresponding indices
         row, col, half = self._select_top_adv(advantage)
 
         # 2) softmax(advantage) with log-sum-exp & policy loss
@@ -131,13 +131,14 @@ class VMPO(AgentTrain):
         alpha_loss, d_kl = self._alpha_loss(policy_old, policy)
 
         # 4) value & full losses
-        value_loss = 0.5 * ((values - returns) ** 2).mean()
+        value_loss = 0.5 * ((value - returns) ** 2).mean()
         loss = value_loss + policy_loss + eta_loss + alpha_loss
+        entropy = self.policy_distribution.entropy(policy).mean()
 
         # 5) image_aug loss
         if self.image_augmentation_alpha > 0.0:
             (policy_div, value_div), img_aug_time = self._augmentation_loss(
-                policy.detach(), values.detach(), observations
+                policy.detach(), value.detach(), observations
             )
             loss += self.image_augmentation_alpha * (policy_div + value_div)
             upd = {
@@ -151,6 +152,7 @@ class VMPO(AgentTrain):
         result = {
             'value_loss': value_loss.item(),
             'policy_loss': policy_loss.item(),
+            'entropy': entropy.item(),
             'eta_loss': eta_loss.item(),
             'alpha_loss': alpha_loss.item(),
             'eta': self.eta.item(),
@@ -188,6 +190,6 @@ class VMPO(AgentTrain):
     def _train_fn(self, rollout):
         observations, actions, rewards, not_done, policy_old = self._rollout_to_tensors(rollout)
         policy_old = policy_old.squeeze(1)
-        policy, values, returns, advantage = self._compute_returns(observations, rewards, not_done)
-        result = self._main(observations, policy_old, policy, values, actions, returns, advantage)
+        policy, value, returns, advantage = self._compute_returns(observations, rewards, not_done)
+        result = self._main(observations, policy_old, policy, value, actions, returns, advantage)
         return result
