@@ -122,16 +122,15 @@ class PPO(AgentTrain):
             value_loss = self._mse_value_loss(value, returns)
         return value_loss
 
-    def calculate_loss(
-            self,
-            observations,
-            policy_old,
-            policy, value, actions,
-            returns, advantage
-    ):
+    def calculate_loss(self, rollout_t, policy, value, returns, advantage):
+        observations = rollout_t['observations']
+        actions = rollout_t['actions']
+        policy_old = rollout_t['log_prob']
+        value_old = rollout_t['value']
+
         policy_loss = self._policy_loss(policy_old, policy, actions, advantage)
-        # value_loss = self._value_loss(value_old, value, returns)
-        value_loss = self._mse_value_loss(value, returns)
+        value_loss = self._value_loss(value_old, value, returns)
+        # value_loss = self._mse_value_loss(value, returns)
         entropy = self.policy_distribution.entropy(policy, actions).mean()
 
         aug_loss, aug_dict = self._image_augmentation_loss(policy, value, observations)
@@ -151,15 +150,20 @@ class PPO(AgentTrain):
             self,
             step,
             rollout_t, row, col,
-            policy_old, returns, advantage
+            returns, advantage
     ):
-        observations, actions, rewards, not_done = rollout_t
+        observations = rollout_t['observations']
+
         # 1) call nn, recompute returns and advantage if needed
         # advantage always computed by training net,
         # so it is unnecessary to recompute adv at the first train-op
         if self.recompute_advantage and step != 0:
             # to compute returns and advantage we _have_ to call nn.forward(...) on full data
-            policy, value, returns, advantage = self._compute_returns(observations, rewards, not_done)
+            policy, value, returns, advantage = self._compute_returns(
+                observations,
+                rollout_t['rewards'],
+                1.0 - rollout_t['is_done']
+            )
             policy, value = policy[row, col], value[row, col]
         else:
             # here we can call nn.forward(...) only on interesting data
@@ -171,10 +175,9 @@ class PPO(AgentTrain):
 
         # 2) calculate losses
         loss, result = self.calculate_loss(
-            observations[row, col],
-            policy_old[row, col],
+            self._select_by_row_col(rollout_t, row, col),
             policy, value,
-            actions[row, col], returns[row, col], advantage[row, col]
+            returns[row, col], advantage[row, col]
         )
 
         # 3) optimize
@@ -183,17 +186,22 @@ class PPO(AgentTrain):
 
         return result
 
+    @staticmethod
+    def _select_by_row_col(tensor_dict, row, col):
+        selected = {k: v[row, col] for k, v in tensor_dict.items()}
+        return selected
+
     @time_it
     def _ppo_epoch(
             self,
-            rollout_t, time, batch,
-            policy_old, returns, advantage
+            rollout_t, returns, advantage
     ):
         # goes once trough rollout
         epoch_result = defaultdict(float)
         mean_train_op_time = 0
 
         # select indices to train on during epoch
+        time, batch = rollout_t['actions'].size()[:2]
         n_transitions = time * batch
         flatten_indices = np.arange(n_transitions)
         np.random.shuffle(flatten_indices)
@@ -209,7 +217,7 @@ class PPO(AgentTrain):
             train_op_result, train_op_time = self._ppo_train_step(
                 step,
                 rollout_t, row, col,
-                policy_old, returns, advantage
+                returns, advantage
             )
 
             for key, value in train_op_result.items():
@@ -230,11 +238,6 @@ class PPO(AgentTrain):
         :param rollout_t:
         :return:
         """
-        # 'done' converts into 'not_done' inside '_rollout_to_tensors' method
-        observations, actions, rewards, not_done, policy_old = rollout_t
-        time, batch = actions.size()[:2]
-        rollout_t = (observations, actions, rewards, not_done)
-
         result_log = defaultdict(float)
 
         mean_epoch_time = 0
@@ -243,13 +246,15 @@ class PPO(AgentTrain):
 
         with torch.no_grad():
             _, _, returns, advantage = self._compute_returns(
-                observations, rewards, not_done
+                rollout_t['observations'],
+                rollout_t['rewards'],
+                1.0 - rollout_t['is_done']
             )
 
         n = self.ppo_n_epoch
         for ppo_epoch in range(n):
             (epoch_result, mean_train_op_time), epoch_time = self._ppo_epoch(
-                rollout_t, time, batch, policy_old, returns, advantage
+                rollout_t, returns, advantage
             )
             for key, value in epoch_result.items():
                 result_log[key] += value / n
@@ -277,7 +282,7 @@ class PPO(AgentTrain):
                may differ from the trained policy
         :return: (loss_dict, time_dict)
         """
-        rollout_t = self._rollout_to_tensors(rollout)
+        rollout_t = self._rollout_to_tensor(rollout)
         # PPO requires no modifications on rollout
         result = self._main(rollout_t)
 

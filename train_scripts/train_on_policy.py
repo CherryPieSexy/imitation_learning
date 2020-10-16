@@ -37,14 +37,12 @@ def main(args):
 
     train_agent_args = args['train_agent_args']
     agent_type = train_agent_args['agent_type']
-    return_pi = False
     if agent_type == 'A2C':
         agent_class = A2C
     elif agent_type == 'PPO':
         agent_class = PPO
     elif agent_type == 'V-MPO':
         agent_class = VMPO
-        return_pi = True
     else:
         raise ValueError(f'only A2C, PPO and V-MPO agents supported, provided {agent_type}')
     optimization_params = train_agent_args['optimization_params']
@@ -61,7 +59,7 @@ def main(args):
     # init and run trainer
     trainer_args = args['trainer_args']
     trainer = OnPolicyTrainer(
-        agent_online, agent_train, return_pi,
+        agent_online, agent_train,
         train_env,
         **trainer_args,
         test_env=test_env,

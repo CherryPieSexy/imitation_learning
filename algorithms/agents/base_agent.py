@@ -45,29 +45,31 @@ class AgentInference:
     def eval(self):
         self.nn.eval()
 
-    def _act(self, observations, return_pi, deterministic):
+    def act(self, observations, deterministic):
+        """
+        :param observations: np.array of observation, shape = [B, dim(obs)]
+        :param deterministic: default to False, if True then action will be chosen as policy mean
+        :return: action and log_prob, both np.array with shape = [B, dim(action)]
+        """
         if self.obs_normalizer is not None:
             mean, var = self.obs_normalizer.mean, self.obs_normalizer.var
-            observations = (observations - mean) / np.sqrt(var + 1e-8)
+            observations = (observations - mean) / max(np.sqrt(var), 1e-6)
         with torch.no_grad():
-            nn_result = self.nn(torch.tensor(observations, dtype=torch.float32, device=self.device))
-            policy = nn_result['policy']
+            nn_result = self.nn(torch.tensor([observations], dtype=torch.float32, device=self.device))
+            policy, value = nn_result['policy'], nn_result['value']
             # RealNVP requires 'no_grad' here
             action, log_prob = self.distribution.sample(policy, deterministic)
-        if return_pi:
-            return action, policy
-        else:
-            return action, log_prob
 
-    def act(self, observations, return_pi=False, deterministic=False):
-        """
-        :param observations: np.array of observation, shape = [T, B, dim(obs)]
-        :param return_pi: True or False. If True then method return full pi, not just log(pi(a))
-        :param deterministic: True or False
-        :return: action and log_prob during data gathering for training, just action during testing
-        """
-        action, log_prob = self._act(observations, return_pi, deterministic)
-        return action, log_prob
+        policy = policy[0].cpu().numpy()
+        value = value[0].cpu().numpy()
+        action = action[0].cpu().numpy()
+        log_prob = log_prob[0].cpu().numpy()
+
+        result = {
+            'policy': policy, 'value': value,
+            'action': action, 'log_prob': log_prob
+        }
+        return result
 
 
 # base class trainable agents
@@ -166,23 +168,30 @@ class AgentTrain:
     def eval(self):
         self.actor_critic_nn.eval()
 
-    def act(self, observations, return_pi=False, deterministic=False):
+    def act(self, observation, deterministic=False):
+        """Method to get an action from the agent.
+
+        :param observation: np.array of observation, shape = [B, dim(obs)]
+        :param deterministic: default to False, if True then action will be chosen as policy mean
+        :return: action and log_prob, both np.array with shape = [B, dim(action)]
         """
-        :param observations: np.array of observation, shape = [T, B, dim(obs)]
-        :param return_pi: True or False. If True then method return full pi, not just log(pi(a))
-        :param deterministic: True or False
-        :return: action and log_prob, both torch.Tensor with shape = [T, B, ...], with gradients
-        """
-        nn_result = self.actor_critic_nn(
-            torch.tensor(observations, dtype=torch.float32, device=self.device)
-        )
-        policy = nn_result['policy']
-        action, log_prob = self.policy_distribution.sample(policy, deterministic)
-        # we can not use 'action.cpu().numpy()' here, because we want action to have gradient
-        if return_pi:
-            return action, policy
-        else:
-            return action, log_prob
+        with torch.no_grad():
+            nn_result = self.actor_critic_nn(
+                torch.tensor([observation], dtype=torch.float32, device=self.device)
+            )
+            policy, value = nn_result['policy'], nn_result['value']
+            action, log_prob = self.policy_distribution.sample(policy, deterministic)
+
+        policy = policy[0].cpu().numpy()
+        value = value[0].cpu().numpy()
+        action = action[0].cpu().numpy()
+        log_prob = log_prob[0].cpu().numpy()
+
+        result = {
+            'policy': policy, 'value': value,
+            'action': action, 'log_prob': log_prob,
+        }
+        return result
 
     def _one_step_returns(self, next_value, rewards, not_done):
         returns = rewards + self.gamma * not_done * next_value
@@ -261,13 +270,10 @@ class AgentTrain:
             advantage = self._normalize_advantage(advantage)
         return policy, value, returns, advantage
 
-    def to_tensor(self, x):
-        return torch.tensor(x, dtype=torch.float32, device=self.device)
-
-    def _rollout_to_tensors(self, rollout):
-        observations, actions, rewards, is_done, policy_old = list(map(self.to_tensor, rollout))
-        not_done = 1.0 - is_done
-        return observations, actions, rewards, not_done, policy_old
+    def _rollout_to_tensor(self, rollout):
+        for key, value in rollout.items():
+            rollout[key] = torch.tensor(value, dtype=torch.float32, device=self.device)
+        return rollout
 
     def _train_fn(self, rollout):
         raise NotImplementedError
