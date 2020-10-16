@@ -227,17 +227,17 @@ class AgentTrain:
         # advantages normalized across batch dimension, I think this is correct
         mean = advantage.mean(dim=1, keepdim=True)
         std = advantage.std(dim=1, keepdim=True)
-        advantages = (advantage - mean) / (std + 1e-8)
-        return advantages
+        advantage = (advantage - mean) / (std + 1e-8)
+        return advantage
 
-    def _optimize_loss(self, loss):
+    def optimize_loss(self, loss):
         self.opt.zero_grad()
         loss.backward()
         gradient_norm = clip_grad_norm_(
             self.actor_critic_nn.parameters(), self.clip_grad
         )
         self.opt.step()
-        return gradient_norm
+        return {'actor_critic_grad_norm': gradient_norm}
 
     def _compute_returns(self, observations, rewards, not_done):
         # TODO: better name for this function.
@@ -247,8 +247,16 @@ class AgentTrain:
         policy = policy[:-1]
         value, next_value = value[:-1], value[1:].detach()
 
+        # reward and not_done must be unsqueezed for correct addition with value
+        if len(rewards.size()) == 2:
+            rewards = rewards.unsqueeze(-1)
+        if len(not_done.size()) == 2:
+            not_done = not_done.unsqueeze(-1)
+
+        # returns goes into value loss and so must be kept vectorized to train multi-head critic,
+        # but advantage goes into policy and must be summed along last dim.
         returns = self._estimate_returns(value, next_value, rewards, not_done)
-        advantage = (returns - value).detach()
+        advantage = (returns - value).sum(-1).detach()
         if self.normalize_adv:
             advantage = self._normalize_advantage(advantage)
         return policy, value, returns, advantage
@@ -264,14 +272,22 @@ class AgentTrain:
     def _train_fn(self, rollout):
         raise NotImplementedError
 
-    @time_it
-    def _augmentation_loss(self, policy, value, observations):
-        observations_aug = batch_crop(observations)
-        nn_result = self.actor_critic_nn(observations_aug)
-        policy_aug, value_aug = nn_result['policy'], nn_result['value']
-        policy_div = kl_divergence(self.policy_distribution_str, policy, policy_aug).mean()
-        value_div = 0.5 * ((value - value_aug) ** 2).mean()
-        return policy_div, value_div
+    def _image_augmentation_loss(self, policy, value, observations):
+        if self.image_augmentation_alpha > 0.0:
+            policy, value = policy.detach(), value.detach()
+            observations_aug = batch_crop(observations)
+            nn_result = self.actor_critic_nn(observations_aug)
+            policy_aug, value_aug = nn_result['policy'], nn_result['value']
+            policy_div = kl_divergence(self.policy_distribution_str, policy, policy_aug).mean()
+            value_div = 0.5 * ((value - value_aug) ** 2).mean()
+            augmentation_loss = self.image_augmentation_alpha * (policy_div + value_div)
+            result_dict = {
+                'augmentation_policy_div': policy_div.item(),
+                'augmentation_value_div': value_div.item()
+            }
+            return augmentation_loss, result_dict
+        else:
+            return 0.0, dict()
 
     def train_on_rollout(self, rollout):
         train_fn_result, train_fn_time = time_it(self._train_fn)(rollout)

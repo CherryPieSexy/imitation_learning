@@ -21,7 +21,8 @@ class ActorCriticTwoMLP(nn.Module):
     def __init__(
             self,
             observation_size, action_size, hidden_size,
-            distribution
+            distribution,
+            critic_dim=1
     ):
         super().__init__()
 
@@ -31,7 +32,7 @@ class ActorCriticTwoMLP(nn.Module):
         self.critic = nn.Sequential(
             init(nn.Linear(observation_size, hidden_size), gain=gain), nn.Tanh(),
             init(nn.Linear(hidden_size, hidden_size), gain=gain), nn.Tanh(),
-            init(nn.Linear(hidden_size, 1))
+            init(nn.Linear(hidden_size, critic_dim))
         )
 
         if distribution == 'Beta':
@@ -56,7 +57,7 @@ class ActorCriticTwoMLP(nn.Module):
             policy = torch.cat((mean, log_std), -1)
         else:
             policy = self.policy(observation)
-        value = self.critic(observation).squeeze(-1)
+        value = self.critic(observation)
 
         result = {
             'policy': policy,
@@ -69,7 +70,8 @@ class ActorCriticCNN(nn.Module):
     # simple 3-layer CNN with ELU activation
     def __init__(
             self,
-            action_size, distribution
+            action_size, distribution,
+            critic_dim=1
     ):
         super().__init__()
 
@@ -90,7 +92,7 @@ class ActorCriticCNN(nn.Module):
             gain_policy = gain
 
         self.policy = init(nn.Linear(hidden_size, action_size), gain=gain_policy)
-        self.value = init(nn.Linear(hidden_size, 1))
+        self.value = init(nn.Linear(hidden_size, critic_dim))
         self.distribution = distribution
 
     def _cnn_forward(self, observation):
@@ -107,13 +109,8 @@ class ActorCriticCNN(nn.Module):
             f = self.fe(flatten)
         else:
             f = flatten
-        # if self.distribution in ['TanhNormal', 'Normal']:
-        #     mean = self.policy(f)
-        #     log_std = self.actor_log_std.expand_as(mean)
-        #     policy = torch.cat((mean, log_std), -1)
-        # else:
         policy = self.policy(f)
-        value = self.value(f).squeeze(-1)
+        value = self.value(f)
         return policy, value
 
     def forward(self, observation):
@@ -127,7 +124,12 @@ class ActorCriticCNN(nn.Module):
 
 
 class ActorCriticDeepCNN(ActorCriticCNN):
-    def __init__(self, action_size, distribution, dropout=0.2):
+    def __init__(
+            self, 
+            action_size, distribution,
+            critic_dim=1,
+            dropout=0.2
+    ):
         super().__init__(action_size, distribution)
         gain = nn.init.calculate_gain('relu')
         gain_policy = 0.01
@@ -143,7 +145,7 @@ class ActorCriticDeepCNN(ActorCriticCNN):
         self.fe = nn.Dropout(dropout)
         self.value = nn.Sequential(
             init(nn.Linear(256, 100), gain=gain), nn.ELU(),
-            init(nn.Linear(100, 1))
+            init(nn.Linear(100, critic_dim))
         )
         if distribution in ['Beta', 'WideBeta', 'TanhNormal', 'Normal']:
             action_size *= 2

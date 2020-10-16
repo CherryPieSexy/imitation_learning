@@ -109,14 +109,11 @@ class PPO(AgentTrain):
         surrogate_1 = (value - returns) ** 2
         surrogate_2 = (clipped_value - returns) ** 2
 
-        value_loss = 0.5 * torch.max(surrogate_1, surrogate_2)
-        return value_loss.mean()
+        return 0.5 * torch.max(surrogate_1, surrogate_2).mean()
 
     @staticmethod
     def _mse_value_loss(value, returns):
-        # simple MSE loss, works better than clipped PPO-style
-        value_loss = 0.5 * ((value - returns) ** 2)
-        return value_loss.mean()
+        return 0.5 * ((value - returns) ** 2).mean()
 
     def _value_loss(self, value_old, value, returns):
         if self.use_ppo_value_loss:
@@ -125,18 +122,29 @@ class PPO(AgentTrain):
             value_loss = self._mse_value_loss(value, returns)
         return value_loss
 
-    def _calc_losses(
+    def calculate_loss(
             self,
+            observations,
             policy_old,
             policy, value, actions,
             returns, advantage
     ):
+        policy_loss = self._policy_loss(policy_old, policy, actions, advantage)
         # value_loss = self._value_loss(value_old, value, returns)
         value_loss = self._mse_value_loss(value, returns)
-        policy_loss = self._policy_loss(policy_old, policy, actions, advantage)
         entropy = self.policy_distribution.entropy(policy, actions).mean()
-        loss = value_loss - policy_loss - self.entropy * entropy
-        return value_loss, policy_loss, entropy, loss
+
+        aug_loss, aug_dict = self._image_augmentation_loss(policy, value, observations)
+
+        loss = value_loss - policy_loss - self.entropy * entropy + aug_loss
+        loss_dict = {
+            'policy_loss': policy_loss.item(),
+            'value_loss': value_loss.item(),
+            'entropy': entropy.item(),
+            'loss': loss.item()
+        }
+        loss_dict.update(aug_dict)
+        return loss, loss_dict
 
     @time_it
     def _ppo_train_step(
@@ -162,40 +170,17 @@ class PPO(AgentTrain):
             policy, value = policy.squeeze(0), value.squeeze(0)
 
         # 2) calculate losses
-        value_loss, policy_loss, entropy, loss = self._calc_losses(
+        loss, result = self.calculate_loss(
+            observations[row, col],
             policy_old[row, col],
             policy, value,
             actions[row, col], returns[row, col], advantage[row, col]
         )
 
-        # 3) calculate image_aug loss if needed
-        if self.image_augmentation_alpha > 0.0:
-            (policy_div, value_div), img_aug_time = self._augmentation_loss(
-                policy.detach().unsqueeze(0),
-                value.detach().unsqueeze(0),
-                observations[row, col].unsqueeze(0)
-            )
-            loss += self.image_augmentation_alpha * (policy_div + value_div)
-            upd = {
-                'policy_div': policy_div.item(),
-                'value_div': value_div.item(),
-                'img_aug_time': img_aug_time
-            }
+        # 3) optimize
+        optimization_result = self.optimize_loss(loss)
+        result.update(optimization_result)
 
-        # optimize
-        grad_norm = self._optimize_loss(loss)
-
-        # 4) store training results in dict and return
-        result = {
-            'value_loss': value_loss.item(),
-            'policy_loss': policy_loss.item(),
-            'entropy': entropy.item(),
-            'loss': loss.item(),
-            'grad_norm': grad_norm
-        }
-        if self.image_augmentation_alpha > 0.0:
-            # noinspection PyUnboundLocalVariable
-            result.update(upd)
         return result
 
     @time_it
@@ -233,25 +218,20 @@ class PPO(AgentTrain):
 
         return epoch_result, mean_train_op_time / num_batches
 
-    def _train_fn(self, rollout):
+    def _main(self, rollout_t):
         """
         It may look a little bit complicated and unreasonable
         to make this method perform several training epoch
         instead of call 'agent._train_on_rollout(...)' outside several times,
         but with this approach I have to put rollout on device and
         compute returns and advantage only once (if option 'recompute_advantage' is disabled),
-        which is slow with current GAE.
+        which is slow with current GAE implementation.
 
-        :param rollout: tuple (observations, actions, rewards, is_done, log_probs),
-               where each one is np.array of shape [time, batch, ...] except observations,
-               observations of shape [time + 1, batch, ...]
-               I want to store 'log_probs' inside rollout
-               because online policy (i.e. the policy gathered rollout)
-               may differ from the trained policy
-        :return: (loss_dict, time_dict)
+        :param rollout_t:
+        :return:
         """
         # 'done' converts into 'not_done' inside '_rollout_to_tensors' method
-        observations, actions, rewards, not_done, policy_old = self._rollout_to_tensors(rollout)
+        observations, actions, rewards, not_done, policy_old = rollout_t
         time, batch = actions.size()[:2]
         rollout_t = (observations, actions, rewards, not_done)
 
@@ -278,10 +258,31 @@ class PPO(AgentTrain):
 
         time_log['mean_ppo_epoch'] = mean_epoch_time / n
         time_log['mean_train_op'] = mean_train_op_time / n
-        if self.image_augmentation_alpha > 0.0:
-            time_log['img_aug'] = result_log.pop('img_aug_time')
-
         return result_log, time_log
+
+    def _train_fn(self, rollout):
+        """
+        I moved all logic inside '_main(...)' method except for moving data on tensors
+        and computing loss itself, which is done by 'calculate_loss(...)' method.
+        I did this to make code more modular and in particular to have direct access
+        to main algorithm function (i.e. loss computing and optimizing) for inheritance.
+        It is useful if one want to add rollout pre-processing (for RND, for example)
+        or modify only part of full loss
+
+        :param rollout: tuple (observations, actions, rewards, is_done, log_probs),
+               where each one is np.array of shape [time, batch, ...] except observations,
+               observations of shape [time + 1, batch, ...]
+               I want to store 'log_probs' inside rollout
+               because online policy (i.e. the policy gathered rollout)
+               may differ from the trained policy
+        :return: (loss_dict, time_dict)
+        """
+        rollout_t = self._rollout_to_tensors(rollout)
+        # PPO requires no modifications on rollout
+        result = self._main(rollout_t)
+
+        # it is ok to return tuple of logs here, base class will handle this
+        return result
 
     # TODO: recurrence:
     #  1) masking in _train_fn

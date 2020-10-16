@@ -15,10 +15,12 @@ class OnPolicyTrainer(BaseTrainer):
             agent_online, agent_train,
             return_pi,
             train_env,
-            update_period,
-            normalize_obs, train_obs_normalizer,
-            scale_reward, normalize_reward, train_reward_normalizer,
-            obs_clip, reward_clip,
+            # kwargs comes from config
+            update_period=1,
+            normalize_obs=False, train_obs_normalizer=False,
+            scale_reward=False, normalize_reward=False,
+            train_reward_normalizer=False,
+            obs_clip=float('inf'), reward_clip=float('inf'),
             warm_up_steps=0,
             **kwargs
     ):
@@ -76,12 +78,12 @@ class OnPolicyTrainer(BaseTrainer):
         self._train_reward_normalizer = train_reward_normalizer
         self._reward_clip = reward_clip
 
-        # store episode reward, length, return and number for each train environment
         self._gamma = self._agent_train.gamma
-        self._env_reward = np.zeros(train_env.num_envs, dtype=np.float32)
+        # store episode reward, length, return and number for each train environment
+        self._env_total_reward = np.zeros(train_env.num_envs, dtype=np.float32)
         self._env_episode_len = np.zeros(train_env.num_envs, dtype=np.int32)
-        self._env_return = np.zeros(train_env.num_envs, dtype=np.float32)
-        self._env_episode = np.zeros(train_env.num_envs, dtype=np.int32)
+        self._env_discounted_return = np.zeros(train_env.num_envs, dtype=np.float32)
+        self._env_episode_number = np.zeros(train_env.num_envs, dtype=np.int32)
 
     def save(self, filename):
         state_dict = {'agent': self._agent_train.state_dict()}
@@ -127,7 +129,7 @@ class OnPolicyTrainer(BaseTrainer):
             if training:
                 self._obs_normalizer.update(observation)
             mean, var = self._obs_normalizer.mean, self._obs_normalizer.var
-            observation = (observation - mean) / np.sqrt(var + 1e-8)
+            observation = (observation - mean) / max(np.sqrt(var), 1e-6)
             observation = np.clip(observation, -self._obs_clip, self._obs_clip)
         return observation
 
@@ -135,9 +137,9 @@ class OnPolicyTrainer(BaseTrainer):
         # 'baselines' version:
         if self._reward_scaler is not None:
             if training:
-                self._reward_scaler.update(self._env_return)
+                self._reward_scaler.update(self._env_discounted_return)
             var = self._reward_scaler.var
-            reward = reward / np.sqrt(var + 1e-8)
+            reward = reward / max(np.sqrt(var), 1e-6)
             reward = np.clip(reward, -self._reward_clip, self._reward_clip)
 
         # 'my' version:
@@ -145,7 +147,7 @@ class OnPolicyTrainer(BaseTrainer):
             if training:
                 self._reward_normalizer.update(reward)
             mean, var = self._reward_normalizer.mean, self._reward_normalizer.var
-            reward = (reward - mean) / np.sqrt(var + 1e-8)
+            reward = (reward - mean) / max(np.sqrt(var), 1e-6)
             reward = np.clip(reward, -self._reward_clip, self._reward_clip)
 
         return reward
@@ -171,9 +173,9 @@ class OnPolicyTrainer(BaseTrainer):
             observation, reward, done, _ = env_step_result
             mean_env_time += env_time
 
-            self._env_reward += reward
+            self._env_total_reward += reward
             self._env_episode_len += 1
-            self._env_return = reward + self._gamma * self._env_return
+            self._env_discounted_return = reward + self._gamma * self._env_discounted_return
 
             raw_rewards.append(np.copy(reward))
 
@@ -196,24 +198,27 @@ class OnPolicyTrainer(BaseTrainer):
         mean_time = mean_act_time, mean_env_time
         return gather_result, mean_time
 
+    def _small_done_callback(self, i):
+        self._writer.add_scalars(
+            'agents/train_reward/',
+            {f'agent_{i}': self._env_total_reward[i]},
+            self._env_episode_number[i]
+        )
+        self._writer.add_scalars(
+            'agents/train_ep_len/',
+            {f'agent_{i}': self._env_episode_len[i]},
+            self._env_episode_number[i]
+        )
+        self._env_total_reward[i] = 0.0
+        self._env_episode_len[i] = 0
+        self._env_discounted_return[i] = 0.0
+        self._env_episode_number[i] += 1
+
     def _done_callback(self, done):
         if np.any(done):
             for i, d in enumerate(done):
                 if d:
-                    self._writer.add_scalars(
-                        'agents/train_reward/',
-                        {f'agent_{i}': self._env_reward[i]},
-                        self._env_episode[i]
-                    )
-                    self._writer.add_scalars(
-                        'agents/train_ep_len/',
-                        {f'agent_{i}': self._env_episode_len[i]},
-                        self._env_episode[i]
-                    )
-                    self._env_reward[i] = 0.0
-                    self._env_episode_len[i] = 0
-                    self._env_return[i] = 0.0
-                    self._env_episode[i] += 1
+                    self._small_done_callback(i)
 
     def _train_step(self, observation, rollout_len, step):
         # gather rollout -> train on it -> write training logs

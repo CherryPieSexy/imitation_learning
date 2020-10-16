@@ -13,54 +13,46 @@ class A2C(AgentTrain):
         policy_loss = log_pi_for_actions * advantage.detach()
         return policy_loss.mean()
 
-    def _main(self, observations, policy, value, actions, returns, advantages):
-        value_loss = 0.5 * ((value - returns) ** 2).mean()
-        policy_loss = self._policy_loss(policy, actions, advantages)
+    @staticmethod
+    def _value_loss(value, returns):
+        return 0.5 * ((value - returns) ** 2).mean()
+
+    # I want to be able to easily modify only loss calculating.
+    def calculate_loss(self, observations, actions, policy, value, returns, advantage):
+        policy_loss = self._policy_loss(policy, actions, advantage)
+        value_loss = self._value_loss(value, returns)
         entropy = self.policy_distribution.entropy(policy).mean()
-        loss = value_loss - policy_loss - self.entropy * entropy
-        if self.image_augmentation_alpha > 0.0:
-            (policy_div, value_div), img_aug_time = self._augmentation_loss(
-                policy.detach(), value.detach(), observations
-            )
-            loss += self.image_augmentation_alpha * (policy_div + value_div)
-            upd = {
-                'policy_div': policy_div.item(),
-                'value_div': value_div.item(),
-                'img_aug_time': img_aug_time
-            }
 
-        grad_norm = self._optimize_loss(loss)
+        aug_loss, aug_dict = self._image_augmentation_loss(policy, value, observations)
 
-        result = {
-            'value_loss': value_loss.item(),
+        loss = value_loss - policy_loss - self.entropy * entropy + aug_loss
+
+        loss_dict = {
             'policy_loss': policy_loss.item(),
+            'value_loss': value_loss.item(),
             'entropy': entropy.item(),
             'loss': loss.item(),
-            'grad_norm': grad_norm
         }
-        if self.image_augmentation_alpha > 0.0:
-            # noinspection PyUnboundLocalVariable
-            result.update(upd)
-        return result
+        loss_dict.update(aug_dict)
+        return loss, loss_dict
 
-    def _train_fn(self, rollout):
-        """
-        :param rollout: tuple (observations, actions, rewards, is_done, log_probs),
-               where each one is np.array of shape [time, batch, ...] except observations,
-               observations of shape [time + 1, batch, ...]
-               I want to store 'log_probs' inside rollout
-               because online policy (i.e. the policy gathered rollout)
-               may not be the trained policy
-        :return: dict of loss values, gradient norm
-        """
+    # A2C basically consist of calculation and optimizing loss
+    def _main(self, rollout_t):
         # 'done' converts into 'not_done' inside '_rollout_to_tensors' method
-        observations, actions, rewards, not_done, _ = self._rollout_to_tensors(rollout)
-
+        observations, actions, rewards, not_done, _ = rollout_t
         policy, value, returns, advantage = self._compute_returns(observations, rewards, not_done)
 
-        result_log = self._main(observations, policy, value, actions, returns, advantage)
-        time_log = dict()
-        if self.image_augmentation_alpha > 0.0:
-            time_log['img_aug'] = result_log.pop('img_aug_time')
+        loss, result = self.calculate_loss(observations, actions, policy, value, returns, advantage)
 
-        return result_log, time_log
+        optimization_result = self.optimize_loss(loss)
+        result.update(optimization_result)
+
+        return result
+
+    # I want to be able to easily modify data in rollout
+    def _train_fn(self, rollout):
+        rollout_t = self._rollout_to_tensors(rollout)
+        # A2C requires no modifications of rollout
+
+        result = self._main(rollout_t)
+        return result

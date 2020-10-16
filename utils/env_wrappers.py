@@ -107,6 +107,9 @@ class ImageEnvWrapper(gym.Wrapper):
         self.x_size = x_size
         self.y_size = y_size
 
+        shape = (1 if convert_to_gray else 3, x_size, y_size)
+        self.observation_space = gym.spaces.Box(-1, +1, shape=shape)
+
     @staticmethod
     def _img_2_gray(img):
         img = np.dot(img[..., :], [0.299, 0.587, 0.114])
@@ -118,6 +121,9 @@ class ImageEnvWrapper(gym.Wrapper):
         if self.convert_to_gray:
             img = self._img_2_gray(img)
         img = cv2.resize(img, (self.x_size, self.y_size))
+        if self.convert_to_gray:
+            img = img[..., None]  # add channels dim back
+        img = np.transpose(img, (2, 0, 1))  # make channels first dimension
         return img
 
     def reset(self):
@@ -137,17 +143,24 @@ class FrameStackWrapper(gym.Wrapper):
         self.n_stack = n_stack
         self.stack = None
 
+        observation_shape = self.env.observation_space.shape
+        new_observation_shape = (observation_shape[0] * n_stack,) + observation_shape[1:]
+        self.observation_space = gym.spaces.Box(
+            low=-1, high=+1,
+            shape=new_observation_shape
+        )
+
     def reset(self):
         obs = self.env.reset()
         self.stack = deque([obs] * self.n_stack)
-        observation = np.copy(self.stack)
+        observation = np.concatenate(np.copy(self.stack), axis=0)
         return observation
 
     def step(self, action, **kwargs):
         observation, reward, done, info = self.env.step(action, **kwargs)
         self.stack.popleft()
         self.stack.append(observation)
-        observation = np.copy(self.stack)
+        observation = np.concatenate(np.copy(self.stack), axis=0)
         return observation, reward, done, info
 
 

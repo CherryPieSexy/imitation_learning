@@ -119,7 +119,7 @@ Humanoid-v3: mean reward ~11.3k, 14 fails over 1000 episodes, [config](train_scr
 ![humanoid](./gifs/humanoid.gif)
 
 Experiments with Humanoid done in mujoco v2 
-which have integration bug that makes environment easier. For academic purposes it is correct to use version of mujoco for Humanoid is 1.5
+which have integration bug that makes environment easier. For academic purposes it is correct to use mujoco v1.5
 
 CarRacing-v0: mean reward = 894 ± 32, 26 fails over 100 episodes 
 (episode is considered failed if reward < 900), 
