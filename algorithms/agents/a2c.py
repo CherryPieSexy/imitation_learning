@@ -44,7 +44,7 @@ class A2C(AgentTrain):
         policy, value, returns, advantage = self._compute_returns(
             rollout_t['observations'],
             rollout_t['rewards'],
-            1.0 - rollout_t['is_done']
+            rollout_t['is_done']
         )
         loss, result = self.calculate_loss(rollout_t, policy, value, returns, advantage)
 

@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 from torch.nn.utils import clip_grad_norm_
 
@@ -45,17 +44,31 @@ class AgentInference:
     def eval(self):
         self.nn.eval()
 
-    def act(self, observations, deterministic):
+    def _t(self, x):
+        # observation may be dict itself (in goal-augmented or multi-part observation envs)
+        if type(x) is dict:
+            x_t = {
+                key: torch.tensor(value, dtype=torch.float32, device=self.device)
+                for key, value in x.items()
+            }
+        else:
+            x_t = torch.tensor(x, dtype=torch.float32, device=self.device)
+        return x_t
+
+    def act(self, observation, deterministic):
         """
-        :param observations: np.array of observation, shape = [B, dim(obs)]
+        :param observation: np.array of observation, shape = [B, dim(obs)]
         :param deterministic: default to False, if True then action will be chosen as policy mean
         :return: action and log_prob, both np.array with shape = [B, dim(action)]
         """
         if self.obs_normalizer is not None:
-            mean, var = self.obs_normalizer.mean, self.obs_normalizer.var
-            observations = (observations - mean) / max(np.sqrt(var), 1e-6)
+            observation = self.obs_normalizer.normalize(observation)
         with torch.no_grad():
-            nn_result = self.nn(torch.tensor([observations], dtype=torch.float32, device=self.device))
+            if type(observation) is dict:
+                observation = {key: value[None, :] for key, value in observation.items()}
+            else:
+                observation = [observation]
+            nn_result = self.nn(self._t(observation))
             policy, value = nn_result['policy'], nn_result['value']
             # RealNVP requires 'no_grad' here
             action, log_prob = self.distribution.sample(policy, deterministic)
@@ -68,6 +81,16 @@ class AgentInference:
         result = {
             'policy': policy, 'value': value,
             'action': action, 'log_prob': log_prob
+        }
+        return result
+
+    def log_prob(self, observations, actions):
+        with torch.no_grad():
+            nn_result = self.nn(self._t(observations))
+            policy, value = nn_result['policy'], nn_result['value']
+            log_prob = self.distribution.log_prob(policy, self._t(actions))
+        result = {
+            'value': value, 'log_prob': log_prob
         }
         return result
 
@@ -142,12 +165,7 @@ class AgentTrain:
         :param obs_normalizer: RunningMeanStd object
         :param reward_normalizer: RunningMeanStd object
         """
-        state_dict = {
-            'nn': self.actor_critic_nn.state_dict(),
-            'opt': self.opt.state_dict(),
-        }
-        if hasattr(self.policy_distribution, 'has_state'):
-            state_dict['distribution'] = self.policy_distribution.state_dict()
+        state_dict = self.state_dict()
 
         if obs_normalizer is not None:
             state_dict['obs_normalizer'] = obs_normalizer.state_dict()
@@ -159,14 +177,25 @@ class AgentTrain:
         checkpoint = torch.load(filename, **kwargs)
         agent_state = checkpoint['agent']
         self.load_state_dict(agent_state)
-        # self.nn.load_state_dict(checkpoint['agent']['nn'])
-        # self.opt.load_state_dict(checkpoint['agent']['opt'])
 
     def train(self):
         self.actor_critic_nn.train()
 
     def eval(self):
         self.actor_critic_nn.eval()
+
+    def _t(self, x):
+        # observation may be dict itself (in goal-augmented or multipart observation envs)
+        if type(x) is dict:
+            x_t = {
+                key: torch.tensor(value, dtype=torch.float32, device=self.device)
+                for key, value in x.items()
+            }
+        elif type(x) is torch.Tensor:
+            x_t = x.clone().detach()
+        else:
+            x_t = torch.tensor(x, dtype=torch.float32, device=self.device)
+        return x_t
 
     def act(self, observation, deterministic=False):
         """Method to get an action from the agent.
@@ -176,9 +205,11 @@ class AgentTrain:
         :return: action and log_prob, both np.array with shape = [B, dim(action)]
         """
         with torch.no_grad():
-            nn_result = self.actor_critic_nn(
-                torch.tensor([observation], dtype=torch.float32, device=self.device)
-            )
+            if type(observation) is dict:
+                observation = {key: [value] for key, value in observation.items()}
+            else:
+                observation = [observation]
+            nn_result = self.actor_critic_nn(self._t(observation))
             policy, value = nn_result['policy'], nn_result['value']
             action, log_prob = self.policy_distribution.sample(policy, deterministic)
 
@@ -219,7 +250,8 @@ class AgentTrain:
         returns = torch.stack(returns[::-1])
         return returns
 
-    def _estimate_returns(self, value, next_value, rewards, not_done):
+    def _estimate_returns(self, value, next_value, rewards, is_done):
+        not_done = 1.0 - is_done
         with torch.no_grad():  # returns should not have gradients in any case!
             if self.returns_estimator == '1-step':
                 returns = self._one_step_returns(next_value, rewards, not_done)
@@ -248,7 +280,7 @@ class AgentTrain:
         self.opt.step()
         return {'actor_critic_grad_norm': gradient_norm}
 
-    def _compute_returns(self, observations, rewards, not_done):
+    def _compute_returns(self, observations, rewards, is_done):
         # TODO: better name for this function.
         #  It not only compute returns, but call nn and compute advantage
         nn_result = self.actor_critic_nn(observations)
@@ -259,12 +291,12 @@ class AgentTrain:
         # reward and not_done must be unsqueezed for correct addition with value
         if len(rewards.size()) == 2:
             rewards = rewards.unsqueeze(-1)
-        if len(not_done.size()) == 2:
-            not_done = not_done.unsqueeze(-1)
+        if len(is_done.size()) == 2:
+            is_done = is_done.unsqueeze(-1)
 
         # returns goes into value loss and so must be kept vectorized to train multi-head critic,
         # but advantage goes into policy and must be summed along last dim.
-        returns = self._estimate_returns(value, next_value, rewards, not_done)
+        returns = self._estimate_returns(value, next_value, rewards, is_done)
         advantage = (returns - value).sum(-1).detach()
         if self.normalize_adv:
             advantage = self._normalize_advantage(advantage)
@@ -272,15 +304,17 @@ class AgentTrain:
 
     def _rollout_to_tensor(self, rollout):
         for key, value in rollout.items():
-            rollout[key] = torch.tensor(value, dtype=torch.float32, device=self.device)
+            rollout[key] = self._t(value)
         return rollout
 
     def _train_fn(self, rollout):
         raise NotImplementedError
 
-    def _image_augmentation_loss(self, policy, value, observations):
+    def _image_augmentation_loss(self, rollout_t, policy, value):
         if self.image_augmentation_alpha > 0.0:
+            observations = rollout_t['observations']
             policy, value = policy.detach(), value.detach()
+
             observations_aug = batch_crop(observations)
             nn_result = self.actor_critic_nn(observations_aug)
             policy_aug, value_aug = nn_result['policy'], nn_result['value']

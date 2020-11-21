@@ -1,9 +1,9 @@
+import time
+
 import numpy as np
 import torch
 from tqdm import trange
 
-
-from utils.utils import time_it
 from algorithms.normalization import RunningMeanStd
 from trainers.base_trainer import BaseTrainer
 
@@ -62,15 +62,15 @@ class OnPolicyTrainer(BaseTrainer):
         self._train_env = train_env
 
         # normalizers:
-        self._obs_normalizer = RunningMeanStd() if normalize_obs else None
+        self._obs_normalizer = RunningMeanStd(obs_clip) if normalize_obs else None
         self._train_obs_normalizer = train_obs_normalizer
-        self._obs_clip = obs_clip
         assert not (normalize_reward and scale_reward), \
             'reward may be normalized or scaled, but not both at the same time!'
-        self._reward_scaler = RunningMeanStd() if scale_reward else None
-        self._reward_normalizer = RunningMeanStd() if normalize_reward else None
+        self._normalize_reward = normalize_reward
+        self._scale_reward = scale_reward
+        self._reward_normalizer = RunningMeanStd(reward_clip) \
+            if normalize_reward or scale_reward else None
         self._train_reward_normalizer = train_reward_normalizer
-        self._reward_clip = reward_clip
 
         self._gamma = self._agent_train.gamma
         # store episode reward, length, return and number for each train environment
@@ -96,102 +96,165 @@ class OnPolicyTrainer(BaseTrainer):
         if 'reward_normalizer' in checkpoint and self._reward_normalizer is not None:
             self._reward_normalizer.load_state_dict(checkpoint['reward_normalizer'])
 
-    def _act(self, fake_agent, observation, deterministic, need_norm=True, **kwargs):
+    def _act(self, fake_agent, observation, deterministic, **kwargs):
         # this method used ONLY inside base class '._test_agent_service()' method
         # 'fake_agent' arg is unused to make this method work in BaseTrainer.test_agent_service
-        if need_norm:
-            observation = self._normalize_observation(observation, False)
+        observation = self._normalize_observation_fn(observation, False)
         return super()._act(self._agent_online, observation, deterministic)
 
-    def _normalize_observation(self, observation, training):
+    def _normalize_observation_fn(self, observation, training):
         if self._obs_normalizer is not None:
             if training:
                 self._obs_normalizer.update(observation)
-            mean, var = self._obs_normalizer.mean, self._obs_normalizer.var
-            observation = (observation - mean) / np.maximum(np.sqrt(var), 1e-6)
-            observation = np.clip(observation, -self._obs_clip, self._obs_clip)
+            observation = self._obs_normalizer.normalize(observation)
         return observation
 
-    def _normalize_reward(self, reward, training):
+    def _normalize_reward_fn(self, reward, training):
         # 'baselines' version:
-        if self._reward_scaler is not None:
+        if self._scale_reward is not None:
             if training:
-                self._reward_scaler.update(self._env_discounted_return)
-            var = self._reward_scaler.var
-            reward = reward / np.maximum(np.sqrt(var), 1e-6)
-            reward = np.clip(reward, -self._reward_clip, self._reward_clip)
+                self._reward_normalizer.update(self._env_discounted_return)
+            reward = self._reward_normalizer.scale(reward)
 
         # 'my' version:
         if self._reward_normalizer is not None:
             if training:
                 self._reward_normalizer.update(reward)
-            mean, var = self._reward_normalizer.mean, self._reward_normalizer.var
-            reward = (reward - mean) / np.maximum(np.sqrt(var), 1e-6)
-            reward = np.clip(reward, -self._reward_clip, self._reward_clip)
+            reward = self._reward_normalizer.normalize(reward)
 
         return reward
 
-    def _call_after_env_step(self, reward, observation):
-        # update running statistics and normalize reward & observation
-        self._env_total_reward += reward
+    def _update_running_statistics(self, raw_reward):
+        self._env_total_reward += raw_reward
         self._env_episode_len += 1
-        self._env_discounted_return = reward + self._gamma * self._env_discounted_return
+        self._env_discounted_return = raw_reward + self._gamma * self._env_discounted_return
 
-        observation = self._normalize_observation(observation, training=self._train_obs_normalizer)
-        reward = self._normalize_reward(reward, training=self._train_reward_normalizer)
-        return reward, observation
+    def _normalize_rollout(self, rollout):
+        if self._obs_normalizer is not None:
+            observations = rollout['observations']
+            normalized_observations = self._obs_normalizer.normalize_vec(observations)
+            rollout['observations'] = normalized_observations
+            if self._train_obs_normalizer:
+                self._obs_normalizer.update_vec(observations)
 
-    @time_it
+        if self._reward_normalizer is not None:
+            rewards = rollout['rewards']
+            if self._normalize_reward:
+                normalized_rewards = self._reward_normalizer.normalize_vec(rewards)
+                rollout['rewards'] = normalized_rewards
+                if self._train_reward_normalizer:
+                    self._reward_normalizer.update_vec(rewards)
+            elif self._scale_reward:
+                normalized_rewards = self._reward_normalizer.scale_vec(rewards)
+                rollout['rewards'] = normalized_rewards
+                if self._train_reward_normalizer:
+                    # TODO: this update is incorrect,
+                    #  need to store last returns at each step during rollout gathering
+                    self._reward_normalizer.update_vec(
+                        self._env_discounted_return
+                    )
+
+        return rollout
+
+    def _act_and_step(self, observation):
+        # calculate action, step environment, collect results into dict
+        act_result, act_time = self._act(None, observation, deterministic=False)
+        action = act_result['action']
+
+        env_step_result, env_time = self._env_step(self._train_env, action)
+        observation, reward, done, info = env_step_result
+        # convert info from tuple of dicts to dict of np.arrays
+        info = {
+            key: np.stack([info_env.get(key, None) for info_env in info])
+            for key in info[0].keys()
+        }
+        self._done_callback(done)
+
+        self._update_running_statistics(reward)
+        # reward, observation = self._call_after_env_step(raw_reward, observation)
+        result = {
+            'observation': observation,
+            'reward': reward,
+            'done': done,
+            'info': info,
+            **act_result
+        }
+        return result, act_time, env_time
+
+    @staticmethod
+    def _list_of_dicts_to_dict_of_np_array(list_of_dicts, super_key):
+        # useful to convert observations and infos
+        result = {
+            key: np.stack([x[super_key][key] for x in list_of_dicts])
+            for key in list_of_dicts[0][super_key].keys()
+        }
+        return result
+
+    def _rollout_from_list_to_dict(self, rollout, first_observation):
+        plural = {
+            'observation': 'observations',
+            'action': 'actions',
+            'reward': 'rewards',
+            'done': 'is_done',
+        }
+        # observation may be of type dict so it requires 'special' concatenation
+        if type(rollout[0]['observation']) is dict:
+            cat_observations = self._list_of_dicts_to_dict_of_np_array(
+                [{'observation': first_observation}, *rollout], 'observation'
+            )
+        else:
+            cat_observations = np.stack(
+                [x['observation'] for x in [{'observation': first_observation}, *rollout]]
+            )
+
+        cat_infos = self._list_of_dicts_to_dict_of_np_array(rollout, 'info')
+
+        keys = rollout[0].keys()
+        keys = [k for k in keys if k not in ['observation', 'info']]
+        rollout = {
+            plural.get(k, k): np.stack([x[k] for x in rollout])
+            for k in keys
+        }
+        rollout['observations'] = cat_observations
+        rollout['infos'] = cat_infos
+        return rollout
+
     def _gather_rollout(self, observation, rollout_len):
         # this function is called only when agent is training
-        # initial observation (i.e. at the beginning of training) does not care about normalization
-        raw_rewards = []
-        observations, rewards, is_done = [observation], [], []
-        act_results = []  # actions, values, log-probs, policy goes here
+        start_time = time.time()
+
+        first_observation = observation
+        rollout = []
 
         mean_act_time = 0
         mean_env_time = 0
 
         for _ in range(rollout_len):
-            act_result, act_time = self._act(None, observation, deterministic=False, need_norm=False)
-            action = act_result['action']
+            act_step_result, act_time, env_time = self._act_and_step(observation)
+            observation = act_step_result['observation']
+            rollout.append(act_step_result)
             mean_act_time += act_time
-
-            env_step_result, env_time = self._env_step(self._train_env, action)
-            observation, reward, done, _ = env_step_result
             mean_env_time += env_time
-
-            raw_rewards.append(np.copy(reward))
-
-            reward, observation = self._call_after_env_step(reward, observation)
-
-            observations.append(observation)
-            rewards.append(reward)
-            is_done.append(done)
-
-            act_results.append(act_result)
-
-            self._done_callback(done)
 
         mean_act_time /= rollout_len
         mean_env_time /= rollout_len
 
-        # act_results here is a list of dicts, convert it to dict of 'numpy.array'
-        act_results = {
-            k: np.stack([x[k] for x in act_results])
-            for k in act_results[0].keys()
-        }
-        act_results['actions'] = act_results.pop('action')
+        # now rollout is a list of dicts, convert it to dict of 'numpy.array'
+        rollout = self._rollout_from_list_to_dict(rollout, first_observation)
 
-        rollout = {
-            'observations': observations,
-            'rewards': rewards,
-            'is_done': is_done,
-            **act_results
+        elapsed_time = time.time() - start_time
+
+        rewards = rollout['rewards']
+        rollout_log = {
+            'reward_mean': rewards.mean(),
+            'reward_std': rewards.std()
         }
-        gather_result = rollout, raw_rewards, observation
-        mean_time = mean_act_time, mean_env_time
-        return gather_result, mean_time
+        time_log = {
+            'mean_act_time': mean_act_time,
+            'mean_env_time': mean_env_time,
+            'gather_rollout_time': elapsed_time
+        }
+        return observation, rollout, rollout_log, time_log
 
     def _small_done_callback(self, i):
         self._writer.add_scalars(
@@ -215,21 +278,18 @@ class OnPolicyTrainer(BaseTrainer):
                 if d:
                     self._small_done_callback(i)
 
-    def _train_step(self, observation, rollout_len, step):
+    def _train_step(self, observation, rollout_len, step, train_agent=True):
         # gather rollout -> train on it -> write training logs
-        (gather_result, mean_time), gather_time = self._gather_rollout(observation, rollout_len)
+        observation, rollout, rollout_log, time_log = self._gather_rollout(observation, rollout_len)
+        rollout = self._normalize_rollout(rollout)
 
-        rollout, raw_rewards, observation = gather_result
-        mean_act_time, mean_env_time = mean_time
+        if train_agent:
+            train_logs, time_logs = self._agent_train.train_on_rollout(rollout)
+        else:
+            train_logs, time_logs = dict(), dict()
 
-        train_logs, time_logs = self._agent_train.train_on_rollout(rollout)
-        train_logs['reward_mean'] = np.mean(raw_rewards)
-        train_logs['reward_std'] = np.std(raw_rewards)
-
-        time_logs['mean_act_time'] = mean_act_time
-        time_logs['mean_env_time'] = mean_env_time
-        time_logs['gather_rollout_time'] = gather_time
-
+        train_logs.update(rollout_log)
+        time_logs.update(time_log)
         self._write_logs('train/', train_logs, step)
         self._write_logs('time/', time_logs, step)
         return observation
@@ -253,15 +313,24 @@ class OnPolicyTrainer(BaseTrainer):
         self._save_n_test(0, n_tests_per_epoch, self._agent_online)
 
         self._agent_train.train()  # always in training mode
+
+        if self._warm_up_steps > 0:
+            # just update normalizers statistics without training agent
+            p_bar = trange(self._warm_up_steps, ncols=90, desc='warm_up')
+            for step in p_bar:
+                observation = self._train_step(
+                    observation, rollout_len, step, train_agent=False
+                )
+
         for epoch in range(n_epoch):
             self._agent_online.train()
             p_bar = trange(n_steps_per_epoch, ncols=90, desc=f'epoch_{epoch}')
             for train_step in p_bar:
-                step = train_step + epoch * n_steps_per_epoch
+                step = train_step + epoch * n_steps_per_epoch + self._warm_up_steps
                 observation = self._train_step(
                     observation, rollout_len, step
                 )
-                if step > self._warm_up_steps and (step + 1) % self._update_period == 0:
+                if (step + 1) % self._update_period == 0:
                     self._update_online_agent()
 
             self._update_online_agent()

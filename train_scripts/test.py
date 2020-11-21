@@ -33,10 +33,14 @@ def play_episode(
         if pause:  # useful to start 'Kazam', select window and record video
             input("press 'enter' to continue...")
     while not done:
-        # agent always takes observation with [time, batch, *dim(obs)] size as input
+        # agent always takes observation with [batch, *dim(obs)] size as input
         # and returns action and log-prob with corresponding size
-        action, _ = agent.act([[obs]], deterministic=deterministic)
-        action = action.cpu().numpy()[0, 0]
+        if type(obs) is dict:
+            act_obs = {key: value[None, :] for key, value in obs.items()}
+        else:
+            act_obs = [obs]
+        act_result = agent.act(act_obs, deterministic=deterministic)
+        action = act_result['action'][0]
         obs, reward, done, info = env.step(action, render=not silent)
         episode_reward += reward
         episode_len += 1

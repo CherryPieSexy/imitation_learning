@@ -37,9 +37,8 @@ class PPO(AgentTrain):
                                     the training data is divided during one epoch
         :param ppo_epsilon:         float, policy (and optionally value) clipping parameter
         :param use_ppo_value_loss:  bool, switches value loss function
-                                    from PPO-like clipped (True) or simple MSE (False).
-                                    Currently only MSE loss is supported.
-        :param rollback_alpha:      float, policy-rollback loss parameter.
+                                    from PPO-like clipped (True) or simple MSE (False)
+        :param rollback_alpha:      float, policy-rollback loss parameter
                                     Rollback is turned on if rollback_alpha > 0
         :param recompute_advantage: bool, if True the returns and advantage
                                     will be recomputed after each nn update
@@ -54,8 +53,10 @@ class PPO(AgentTrain):
         self.ppo_n_epoch = ppo_n_epoch
         self.ppo_n_mini_batches = ppo_n_mini_batches
 
-    def _policy_loss(self, policy_old, policy, actions, advantage):
-        log_pi_for_actions_old = policy_old
+    def _policy_loss(self, rollout_t, policy, advantage):
+        log_pi_for_actions_old = rollout_t['log_prob']
+        actions = rollout_t['actions']
+
         log_pi_for_actions = self.policy_distribution.log_prob(policy, actions)
         log_prob_ratio = log_pi_for_actions - log_pi_for_actions_old
         log_prob_ratio.clamp_max_(20)
@@ -67,7 +68,7 @@ class PPO(AgentTrain):
             policy_loss = self._clipped_loss(prob_ratio, advantage)
 
         policy_loss = policy_loss.mean()
-        return policy_loss.mean()
+        return policy_loss
 
     def _clipped_loss(self, prob_ratio, advantage):
         prob_ratio_clamp = torch.clamp(
@@ -109,31 +110,29 @@ class PPO(AgentTrain):
         surrogate_1 = (value - returns) ** 2
         surrogate_2 = (clipped_value - returns) ** 2
 
-        return 0.5 * torch.max(surrogate_1, surrogate_2).mean()
+        return 0.5 * torch.max(surrogate_1, surrogate_2)
 
     @staticmethod
     def _mse_value_loss(value, returns):
-        return 0.5 * ((value - returns) ** 2).mean()
+        return 0.5 * ((value - returns) ** 2)
 
-    def _value_loss(self, value_old, value, returns):
+    def _value_loss(self, rollout_t, value, returns):
         if self.use_ppo_value_loss:
+            value_old = rollout_t['value']
             value_loss = self._clipped_value_loss(value_old, value, returns)
         else:
             value_loss = self._mse_value_loss(value, returns)
         return value_loss
 
     def calculate_loss(self, rollout_t, policy, value, returns, advantage):
-        observations = rollout_t['observations']
         actions = rollout_t['actions']
-        policy_old = rollout_t['log_prob']
-        value_old = rollout_t['value']
 
-        policy_loss = self._policy_loss(policy_old, policy, actions, advantage)
-        value_loss = self._value_loss(value_old, value, returns)
-        # value_loss = self._mse_value_loss(value, returns)
+        policy_loss = self._policy_loss(rollout_t, policy, advantage).mean()
+        value_loss = self._value_loss(rollout_t, value, returns).mean()
         entropy = self.policy_distribution.entropy(policy, actions).mean()
 
-        aug_loss, aug_dict = self._image_augmentation_loss(policy, value, observations)
+        # augmentation loss is already reduced inside 'super' class
+        aug_loss, aug_dict = self._image_augmentation_loss(rollout_t, policy, value)
 
         loss = value_loss - policy_loss - self.entropy * entropy + aug_loss
         loss_dict = {
@@ -162,14 +161,19 @@ class PPO(AgentTrain):
             policy, value, returns, advantage = self._compute_returns(
                 observations,
                 rollout_t['rewards'],
-                1.0 - rollout_t['is_done']
+                rollout_t['is_done']
             )
             policy, value = policy[row, col], value[row, col]
         else:
             # here we can call nn.forward(...) only on interesting data
             # observations[row, col] has only batch dimension =>
             # need to unsqueeze and squeeze back
-            nn_result = self.actor_critic_nn(observations[row, col].unsqueeze(0))
+            if type(observations) is dict:
+                roi_observations = self._select(observations, row, col)
+                roi_observations = {key: value.unsqueeze(0) for key, value in roi_observations.items()}
+            else:
+                roi_observations = observations[row, col].unsqueeze(0)
+            nn_result = self.actor_critic_nn(roi_observations)
             policy, value = nn_result['policy'], nn_result['value']
             policy, value = policy.squeeze(0), value.squeeze(0)
 
@@ -187,8 +191,15 @@ class PPO(AgentTrain):
         return result
 
     @staticmethod
-    def _select_by_row_col(tensor_dict, row, col):
-        selected = {k: v[row, col] for k, v in tensor_dict.items()}
+    # observations may be dict and infos are always dict
+    def _select(select_from, row, col):
+        if type(select_from) is dict:
+            return {key: value[row, col] for key, value in select_from.items()}
+        else:
+            return select_from[row, col]
+
+    def _select_by_row_col(self, tensor_dict, row, col):
+        selected = {k: self._select(v, row, col) for k, v in tensor_dict.items()}
         return selected
 
     @time_it
@@ -248,7 +259,7 @@ class PPO(AgentTrain):
             _, _, returns, advantage = self._compute_returns(
                 rollout_t['observations'],
                 rollout_t['rewards'],
-                1.0 - rollout_t['is_done']
+                rollout_t['is_done']
             )
 
         n = self.ppo_n_epoch
@@ -274,12 +285,11 @@ class PPO(AgentTrain):
         It is useful if one want to add rollout pre-processing (for RND, for example)
         or modify only part of full loss
 
-        :param rollout: tuple (observations, actions, rewards, is_done, log_probs),
-               where each one is np.array of shape [time, batch, ...] except observations,
+        :param rollout: dict with at least following keys:
+               'observations', 'rewards', 'is_done',
+               'actions', 'log_prob', 'values'
+               each value in dict is np.array of shape [time, batch, ...]
                observations of shape [time + 1, batch, ...]
-               I want to store 'log_probs' inside rollout
-               because online policy (i.e. the policy gathered rollout)
-               may differ from the trained policy
         :return: (loss_dict, time_dict)
         """
         rollout_t = self._rollout_to_tensor(rollout)

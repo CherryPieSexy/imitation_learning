@@ -1,5 +1,4 @@
 import numpy as np
-import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from utils.utils import time_it
@@ -20,28 +19,9 @@ class BaseTrainer:
 
     @staticmethod
     @time_it
-    def _act(
-            agent, observation, deterministic,
-            return_pi=False
-    ):
-        """Method to get an action from the agent.
-
-        :param agent: an agent to sample action, expect observations of shape [Time, Batch, dim(obs)]
-        :param observation: np.array of batch of observations, shape [Batch, dim(obs)]
-        :param deterministic: if True then action will be chosen as policy mean
-        :param return_pi: default to False, if True then returns full policy parameters
-        :return: action and log-prob of action or full policy parameters
-        """
-
-        # This function used to generate rollouts,
-        # so it always takes observation without time dimension as input.
-        # Because of that I have to unsqueeze input and squeeze action and log-prob back.
-        with torch.no_grad():
-            action, log_prob = agent.act([observation], return_pi, deterministic)
-        action, log_prob = action[0], log_prob[0]
-
-        action, log_prob = action.cpu().numpy(), log_prob.cpu().numpy()
-        return action, log_prob
+    def _act(agent, observation, deterministic):
+        # I do need additional method for acting to easily inherit from it
+        return agent.act(observation, deterministic)
 
     @staticmethod
     @time_it
@@ -54,7 +34,7 @@ class BaseTrainer:
 
     @time_it
     def _test_agent_service(self, n_tests, agent, deterministic):
-        """Tests an 'agent' by playing #'n_test' episodes and return result
+        """Tests an 'agent' by playing 'n_test' episodes and return result
 
         :param n_tests:
         :param agent:
@@ -67,7 +47,8 @@ class BaseTrainer:
 
         while len(episode_rewards) < n_tests:
             # I do not care about time while testing
-            (action, _), _ = self._act(agent, observation, deterministic=deterministic)
+            act_result, _ = self._act(agent, observation, deterministic=deterministic)
+            action = act_result['action']
             env_step_result, _ = self._env_step(self._test_env, action)
             observation, reward, done, _ = env_step_result
             env_reward += reward

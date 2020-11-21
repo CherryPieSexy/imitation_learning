@@ -9,187 +9,216 @@ import numpy as np
 gym.logger.set_level(40)
 
 
-class ContinuousActionWrapper(gym.Wrapper):
+def continuous_action_wrapper(env_instance):
     # rescales agent actions from [-1, +1] to [low, high]
-    def __init__(self, env):
-        super().__init__(env)
-        low = self.action_space.low
-        high = self.action_space.high
-        self.a = (high - low) / 2.0
-        self.b = (high + low) / 2.0
+    original_step = env_instance.step
+
+    low = env_instance.action_space.low
+    high = env_instance.action_space.high
+    env_instance.a = (high - low) / 2.0
+    env_instance.b = (high + low) / 2.0
 
     def step(self, action):
-        # noinspection PyTypeChecker
         action = np.clip(action, -1.0, +1.0)
         env_action = self.a * action + self.b
-        return self.env.step(env_action)
+        return original_step(env_action)
+
+    env_instance.step = step.__get__(env_instance)
+    return env_instance
 
 
-class OneHotWrapper(gym.Wrapper):
-    # transforms one-hot encoded actions to id
-    def __init__(self, env):
-        super().__init__(env)
+def one_hot_wrapper(env_instance):
+    original_step = env_instance.step
 
-    def step(self, action):
-        # noinspection PyUnresolvedReferences
+    def step(self, action, **kwargs):
         index = action.argmax()
-        step_result = self.env.step(index)
-        return step_result
+        return original_step(index, **kwargs)
+
+    env_instance.step = step.__get__(env_instance)
+    return env_instance
 
 
-class ActionRepeatWrapper(gym.Wrapper):
-    def __init__(self, env, action_repeat):
-        super().__init__(env)
-        self.action_repeat = action_repeat
+def action_repeat_wrapper(env_instance, n_repeat):
+    original_step = env_instance.step
 
-    def step(self, action, render=False):
+    def step(self, action, render=False, **kwargs):
         reward = 0.0
-        for _ in range(self.action_repeat):
-            obs, r, done, info = self.env.step(action)
+        for _ in range(self.n_repeat):
+            obs, r, done, info = original_step(action, **kwargs)
             if render:
-                self.env.render()
+                env_instance.render()
             reward += r
             if done:
                 break
-        # noinspection PyUnboundLocalVariable
         return obs, reward, done, info
 
-
-class DiePenaltyWrapper(gym.Wrapper):
-    def __init__(self, env, penalty=-100):
-        super().__init__(env)
-        self._penalty = penalty
-
-    def step(self, action, **kwargs):
-        observation, reward, done, info = self.env.step(action, **kwargs)
-        if done:
-            if info.get('TimeLimit.truncated', None) is None:
-                reward += self._penalty
-        return observation, reward, done, info
+    env_instance.n_repeat = n_repeat
+    env_instance.step = step.__get__(env_instance)
+    return env_instance
 
 
-class ImgToGrayWrapper(gym.Wrapper):
-    def __init__(self, env):
-        super().__init__(env)
+# TODO
+def die_penalty_wrapper(env_instance, *args, **kwargs):
+    pass
+# class DiePenaltyWrapper(gym.Wrapper):
+#     def __init__(self, env, penalty=-100):
+#         super().__init__(env)
+#         self._penalty = penalty
+#
+#     def step(self, action, **kwargs):
+#         observation, reward, done, info = self.env.step(action, **kwargs)
+#         if done:
+#             if info.get('TimeLimit.truncated', None) is None:
+#                 reward += self._penalty
+#         return observation, reward, done, info
 
-    @staticmethod
-    def _img_2_gray(img):
+
+def image_wrapper(
+        env_instance,
+        convert_to_gray=True,
+        x_start=0, x_end=-1,
+        y_start=0, y_end=-1,
+        x_size=256, y_size=256
+):
+    original_step = env_instance.step
+    original_reset = env_instance.reset
+
+    def _rgb_2_gray(img):
         img = np.dot(img[..., :], [0.299, 0.587, 0.114])
         img = img / 128.0 - 1
         return img
 
-    def reset(self):
-        observation = self.env.reset()
-        observation = self._img_2_gray(observation)
+    def _process_img(img):
+        img = img[x_start:x_end, y_start, y_end]
+        if convert_to_gray:
+            img = _rgb_2_gray(img)
+        img = cv2.resize(img, x_size, y_size)
+        if convert_to_gray:
+            img = img[..., None]
+        else:
+            img = img / 128.0 - 1
+        img = np.transpose(img, (2, 0, 1))
+        return img
+
+    def step(self, action, **kwargs):
+        observation, reward, done, info = original_step(action, **kwargs)
+        observation = _process_img(observation)
+        return observation, reward, done, info
+
+    def reset(self, **kwargs):
+        observation = original_reset(**kwargs)
+        return _process_img(observation)
+
+    env_instance.step = step.__get__(env_instance)
+    env_instance.reset = reset.__get__(env_instance)
+    return env_instance
+
+
+def frame_stack_wrapper(env_instance, n_stack):
+    original_step = env_instance.step
+    original_reset = env_instance.reset
+
+    env_instance.stack = None
+    observation_space = env_instance.observation_space
+    if type(observation_space) is gym.spaces.Dict:
+        observation_shape = observation_space['observation'].shape
+    else:
+        observation_shape = observation_space.shape
+    new_observation_shape = (observation_shape[0] * n_stack,) + observation_shape[1:]
+    new_observation_space = gym.spaces.Box(low=-1, high=+1, shape=new_observation_shape)
+    if type(observation_space) is gym.spaces.Dict:
+        env_instance.observation_space.spaces['observation'] = new_observation_space
+    else:
+        env_instance.observation_space = new_observation_space
+
+    def _stack_obs(self, observation):
+        if type(observation) is dict:
+            self.stack.append(observation['observation'])
+        else:
+            self.stack.append(observation)
+        obs = np.concatenate(np.copy(self.stack), axis=0)
+        if type(observation) is dict:
+            observation['observation'] = obs
+        else:
+            observation = obs
         return observation
 
     def step(self, action, **kwargs):
-        observation, reward, done, info = self.env.step(action, **kwargs)
-        observation = self._img_2_gray(observation)
-        return observation, reward, done, info
-
-
-class ImageEnvWrapper(gym.Wrapper):
-    # crop and resize
-    def __init__(
-            self, env,
-            convert_to_gray=True,
-            x_start=0, x_end=-1,
-            y_start=0, y_end=-1,
-            x_size=256, y_size=256
-    ):
-        super().__init__(env)
-        self.convert_to_gray = convert_to_gray
-        self.x_start = x_start
-        self.x_end = x_end
-        self.y_start = y_start
-        self.y_end = y_end
-        self.x_size = x_size
-        self.y_size = y_size
-
-        shape = (1 if convert_to_gray else 3, x_size, y_size)
-        self.observation_space = gym.spaces.Box(-1, +1, shape=shape)
-
-    @staticmethod
-    def _img_2_gray(img):
-        img = np.dot(img[..., :], [0.299, 0.587, 0.114])
-        img = img / 128.0 - 1
-        return img
-
-    def _process_img(self, img):
-        img = img[self.x_start:self.x_end, self.y_start:self.y_end]
-        if self.convert_to_gray:
-            img = self._img_2_gray(img)
-        img = cv2.resize(img, (self.x_size, self.y_size))
-        if self.convert_to_gray:
-            img = img[..., None]  # add channels dim back
-        img = np.transpose(img, (2, 0, 1))  # make channels first dimension
-        return img
-
-    def reset(self):
-        obs = self.env.reset()
-        obs = self._process_img(obs)
-        return obs
-
-    def step(self, action, **kwargs):
-        observation, reward, done, info = self.env.step(action, **kwargs)
-        observation = self._process_img(observation)
-        return observation, reward, done, info
-
-
-class FrameStackWrapper(gym.Wrapper):
-    def __init__(self, env, n_stack):
-        super().__init__(env)
-        self.n_stack = n_stack
-        self.stack = None
-
-        observation_shape = self.env.observation_space.shape
-        new_observation_shape = (observation_shape[0] * n_stack,) + observation_shape[1:]
-        self.observation_space = gym.spaces.Box(
-            low=-1, high=+1,
-            shape=new_observation_shape
-        )
-
-    def reset(self):
-        obs = self.env.reset()
-        self.stack = deque([obs] * self.n_stack)
-        observation = np.concatenate(np.copy(self.stack), axis=0)
-        return observation
-
-    def step(self, action, **kwargs):
-        observation, reward, done, info = self.env.step(action, **kwargs)
+        observation, reward, done, info = original_step(action, **kwargs)
         self.stack.popleft()
-        self.stack.append(observation)
-        observation = np.concatenate(np.copy(self.stack), axis=0)
+        observation = self._stack_obs(observation)
         return observation, reward, done, info
 
+    def reset(self, **kwargs):
+        observation = original_reset(**kwargs)
+        if type(observation) is dict:
+            obs = observation['observation']
+        else:
+            obs = observation
+        self.stack = deque([obs] * n_stack)
+        obs = np.concatenate(np.copy(self.stack), axis=0)
+        if type(observation) is dict:
+            observation['observation'] = obs
+        else:
+            observation = obs
+        return observation
 
-class StateLoadWrapper(gym.Wrapper):
-    # works for mujoco environments
-    def __init__(self, env, obs_to_state_fn):
-        super().__init__(env)
-        self.obs_to_env_fn = obs_to_state_fn
-
-    def load_state(self, obs):
-        state = self.obs_to_env_fn(obs)
-        self.env.set_state(**state)
+    env_instance.step = step.__get__(env_instance)
+    env_instance.reset = reset.__get__(env_instance)
+    env_instance._stack_obs = _stack_obs.__get__(env_instance)
+    return env_instance
 
 
-class CustomWrapper(gym.Wrapper):
-    def __init__(self, env, custom_wrapper_path, custom_wrapper_args):
-        """Wraps environment with any wrapper outside this file
+# TODO
+def state_load_wrapper(env_instance):
+    pass
+# class StateLoadWrapper(gym.Wrapper):
+#     # works for mujoco environments
+#     def __init__(self, env, obs_to_state_fn):
+#         super().__init__(env)
+#         self.obs_to_env_fn = obs_to_state_fn
+#
+#     def load_state(self, obs):
+#         state = self.obs_to_env_fn(obs)
+#         self.env.set_state(**state)
 
-        :param env:
-        :param custom_wrapper_path: path to function which will be applied after action execution.
-               Must have form 'folder.sub_folder.file:class_name'
-        """
-        super().__init__(env)
-        module_import_path, class_name = custom_wrapper_path.split(':')
-        module = importlib.import_module(module_import_path)
-        self.custom_wrapper = getattr(module, class_name)(env, **custom_wrapper_args)
+
+def last_achieved_goal_wrapper(env_instance):
+    # Stores previously achieved goal and adds it into observation.
+    # It is useful because vec_env resets environment immediately after done
+    # and last achieved goal (which is contained state after done) is not observable
+    original_step = env_instance.step
+    original_reset = env_instance.reset
+
+    goal_shape = env_instance.observation_space['achieved_goal'].shape
+    fake_goal = np.zeros(goal_shape, dtype=np.float32)
+    env_instance.prev_achieved = fake_goal
 
     def step(self, action, **kwargs):
-        return self.custom_wrapper.step(action, **kwargs)
+        observation, reward, done, info = original_step(action, **kwargs)
+        observation['prev_achieved_goal'] = self.prev_achieved
+        self.prev_achieved = observation['achieved_goal']
+        return observation, reward, done, info
 
-    def reset(self):
-        return self.custom_wrapper.reset()
+    def reset(self, **kwargs):
+        observation = original_reset(**kwargs)
+        observation['prev_achieved_goal'] = self.prev_achieved
+        self.prev_achieved = observation['achieved_goal']
+        return observation
+
+    env_instance.step = step.__get__(env_instance)
+    env_instance.reset = reset.__get__(env_instance)
+    return env_instance
+
+
+def custom_wrapper(env, custom_wrapper_path, custom_wrapper_args):
+    """Wraps environment with any wrapper outside this file
+
+    :param env:
+    :param custom_wrapper_path: path to function which will be applied after action execution.
+           Must have form 'folder.sub_folder.file:class_name'
+    :param custom_wrapper_args: arguments of custom wrapper
+    """
+    module_import_path, class_name = custom_wrapper_path.split(':')
+    module = importlib.import_module(module_import_path)
+    return getattr(module, class_name)(env, **custom_wrapper_args)
