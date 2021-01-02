@@ -69,15 +69,6 @@ Obtained policy:
 
 ![cartpole](gifs/cartpole.gif)
 
-To train on custom environment (with gym interface) add in env_parameters inside python config env type and name:
-```python
-env_args = {
-    'env_type': 'gym.envs.classic_control.cartpole', # path to file with the environment class or installed python module
-    'env_name': 'CartPoleEnv',  # the environment class name
-    'env_args': dict()  # environment arguments, in this case it is empty 
-}
-``` 
-
 #### Testing example
 Results of trained policy may be shown with ```train_scripts/test.py``` script. 
 This script is able to: 
