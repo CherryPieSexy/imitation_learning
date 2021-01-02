@@ -26,8 +26,9 @@ def cnn_forward(cnn, observation):
 
     if type(observation) is dict:
         observation['features'] = conv_features
-
-    return conv_features
+        return observation
+    else:
+        return conv_features
 
 
 class ConvEncoder(nn.Module):
@@ -100,7 +101,7 @@ class TwoLayerActorCritic(nn.Module):
 
     def forward(self, observation):
         if type(observation) is dict:
-            observation = torch.cat([value for _, value in observation.items()])
+            observation = torch.cat([value for _, value in observation.items()], dim=-1)
 
         # detach prevents gradient flowing into encoder.
         obs_v = obs_pi = observation

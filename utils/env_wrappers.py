@@ -124,11 +124,11 @@ class TimeStepWrapper(gym.ObservationWrapper):
         if len(observation.shape) == 3:
             observation = {'img': observation}
 
-        time_info = self._time_step / self._max_time
+        time_info = [self._time_step / self._max_time]
         if type(observation) is dict:
             observation['time_step'] = time_info
         else:
-            observation = np.concatenate((observation, [time_info]), axis=-1)
+            observation = np.concatenate((observation, time_info), axis=-1)
         return observation
 
     def step(self, action, **kwargs):

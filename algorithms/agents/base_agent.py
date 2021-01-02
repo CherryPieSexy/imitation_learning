@@ -126,7 +126,7 @@ class AgentInference:
             x_t = x.to(torch.float32)
         elif type(x) is dict:
             x_t = {
-                key: torch.tensor(value, dtype=torch.float32, device=self.device)
+                key: self._t(value)
                 for key, value in x.items()
             }
         else:
