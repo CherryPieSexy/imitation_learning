@@ -172,6 +172,7 @@ def convert_parameters_normal(parameters):
     mean, log_sigma = parameters.split(half, -1)
     log_sigma_clamp = torch.clamp(log_sigma, -20, +2)
     sigma = log_sigma_clamp.exp()
+    # sigma = torch.nn.functional.softplus(log_sigma + 0.5)
     return mean, sigma
 
 
@@ -197,6 +198,7 @@ class TanhNormal(Distribution):
 
     def mean(self, parameters):
         mean, _ = self._convert_parameters(parameters)
+        mean = torch.tanh(mean)
         return mean
 
     def sample(self, parameters, deterministic):
@@ -230,6 +232,10 @@ class Normal(TanhNormal):
     @staticmethod
     def _env_to_agent(action):
         return action
+
+    def mean(self, parameters):
+        mean, _ = self._convert_parameters(parameters)
+        return mean
 
     @staticmethod
     def _agent_to_env(action):

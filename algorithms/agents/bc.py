@@ -7,48 +7,59 @@ from algorithms.agents.base_agent import AgentTrain
 from algorithms.distributions import continuous_distributions
 
 
-class BehaviorCloning(AgentTrain):
+class BehaviorCloningAgent(AgentTrain):
     def __init__(self, *args, loss_type='mse', **kwargs):
-        assert loss_type in ['mse', 'likelihood']
+        super().__init__(*args, **kwargs)
+        assert loss_type in ['mse', 'log_prob']
+        self.loss_type = loss_type
         if loss_type == 'mse':
             # this loss supported only for continuous distributions
-            assert self.policy_distribution_str in continuous_distributions, \
+            assert self.pi_distribution_str in continuous_distributions, \
                 'mse loss supported only for continuous distributions'
-            self._loss_fn = self._mean_loss
-        else:
-            self._loss_fn = self._log_prob_loss
         super().__init__(*args, **kwargs)
 
-    def to_tensor(self, x):
-        return x.to(torch.float32).to(self.device)
-
-    def _mean_loss(self, policy, actions):
-        # I hope this have some meaning
-        mean, _ = self.policy_distribution.mean(policy)
-        loss = 0.5 * (mean - actions) ** 2
+    @staticmethod
+    def _mean_loss(pi_action, demo_action):
+        loss = 0.5 * (pi_action - demo_action) ** 2
         return loss
 
-    def _log_prob_loss(self, policy, actions):
-        log_pi_for_actions = self.policy_distribution.log_prob(policy, actions)
+    def _log_prob_loss(self, policy, demo_action):
+        log_pi_for_actions = self.pi_distribution.log_prob(policy, demo_action)
         loss = -log_pi_for_actions
         return loss
 
-    def _train_fn(self, rollout):
-        # here rollout is just observations and actions
-        observations, actions, _ = rollout
-        observations = self.to_tensor(observations).unsqueeze(1)
-        actions = self.to_tensor(actions).unsqueeze(1)
+    def calculate_loss(self, policy, demo_action):
+        if self.loss_type == 'mse':
+            pi_action, _ = self.pi_distribution.sample(policy)
+            bc_loss = self._mean_loss(pi_action, demo_action)
+        else:
+            bc_loss = self._log_prob_loss(policy, demo_action)
 
-        nn_result = self.actor_critic_nn(observations)
-        policy = nn_result['policy']
-        loss = self._loss_fn(policy, actions).mean()
+        bc_loss = bc_loss.mean()
+        with torch.no_grad():
+            entropy = self.pi_distribution.entropy(policy).mean()
 
-        grad_norm = self._optimize_loss(loss)
-        result = {
-            'loss': loss.item(),
-            'grad_norm': grad_norm
+        loss_dict = {
+            'bc_loss': bc_loss.item(),
+            'entropy': entropy.item()
         }
+        return bc_loss, loss_dict
 
+    def _main(self, rollout_t):
+        observations, actions = rollout_t['observations'], rollout_t['actions']
+        policy, _ = self._get_policy_value(observations)
+
+        loss, result = self.calculate_loss(policy, actions)
+
+        optimization_result = self._optimize_loss(loss)
+        result.update(optimization_result)
+
+        return result
+
+    def _train_fn(self, rollout):
+        # here 'rollout' have 3 keys: 'observations', 'actions', 'rewards'
+        rollout_t = self._rollout_to_tensor(rollout)
+        result = self._main(rollout_t)
         return result
 
 
@@ -74,8 +85,8 @@ class BCDataSet(Dataset):
 
     def __getitem__(self, idx):
         # add time dimension
-        return (
-            self.observations[idx],
-            self.actions[idx],
-            self.rewards[idx]
-        )
+        return {
+            'observations': self.observations[idx],
+            'actions': self.actions[idx],
+            'rewards': self.rewards[idx]
+        }

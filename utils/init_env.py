@@ -1,13 +1,14 @@
 import importlib
 
 import gym
+import gym.wrappers
 import retro
 
 from utils.vec_env import SubprocVecEnv
 from utils.env_wrappers import (
-    continuous_action_wrapper, one_hot_wrapper, action_repeat_wrapper,
-    die_penalty_wrapper, frame_stack_wrapper,
-    image_wrapper, last_achieved_goal_wrapper, custom_wrapper
+    ContinuousActionWrapper, OneHotWrapper, ActionRepeatWrapper,
+    FrameStackWrapper, DiePenaltyWrapper, ImageEnvWrapper,
+    LastAchievedGoalWrapper, CustomWrapper
 )
 
 
@@ -69,33 +70,34 @@ def init_env(
             _env = gym.wrappers.FlattenObservation(_env)
 
         if custom_wrapper_path is not None:
-            _env = custom_wrapper(_env, custom_wrapper_path, custom_wrapper_args)
+            _env = CustomWrapper(_env, custom_wrapper_path, custom_wrapper_args)
 
         if add_prev_achieved_goal:
-            _env = last_achieved_goal_wrapper(_env)
+            _env = LastAchievedGoalWrapper(_env)
 
         if time_unlimited:
             _env = _env.env
 
         if die_penalty != 0:
-            _env = die_penalty_wrapper(_env, die_penalty)
+            _env = DiePenaltyWrapper(_env, die_penalty)
 
         if isinstance(_env.action_space, gym.spaces.Box):
-            _env = continuous_action_wrapper(_env)  # normalize actions to [-1, +1]
+            # normalize actions to [-1, +1]
+            _env = ContinuousActionWrapper(_env)
 
         if relax_discrete:
-            _env = one_hot_wrapper(_env)
+            _env = OneHotWrapper(_env)
 
         # this wrapper is useful even if action_repeat=1, because it supports rendering
-        _env = action_repeat_wrapper(_env, action_repeat)
+        _env = ActionRepeatWrapper(_env, action_repeat)
 
         # this is common for image envs
         if _env.observation_space.shape is not None:
             if len(_env.observation_space.shape) == 3:
-                _env = image_wrapper(_env, **image_args)
-                _env = frame_stack_wrapper(_env, 4 if frame_stack == 1 else frame_stack)
+                _env = ImageEnvWrapper(_env, **image_args)
+                _env = FrameStackWrapper(_env, 4 if frame_stack == 1 else frame_stack)
         elif frame_stack != 1:
-            _env = frame_stack_wrapper(_env, frame_stack)
+            FrameStackWrapper(_env, frame_stack)
 
         return _env
 

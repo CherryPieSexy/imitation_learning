@@ -11,12 +11,6 @@ class BaseTrainer:
         self._log_dir = log_dir
         self._writer = SummaryWriter(log_dir + 'tb_logs/')
 
-    def save(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def load(self, *args, **kwargs):
-        raise NotImplementedError
-
     @staticmethod
     @time_it
     def _act(agent, observation, deterministic):
@@ -72,8 +66,3 @@ class BaseTrainer:
         test_result, test_time = self._test_agent_service(n_tests, agent, deterministic)
         test_result['test_time'] = test_time
         self._write_logs('test/', test_result, step)
-
-    def _save_n_test(self, epoch, n_tests, agent):
-        checkpoint_name = self._log_dir + 'checkpoints/' + f'epoch_{epoch}.pth'
-        self.save(checkpoint_name)
-        self._test_agent(epoch, n_tests, agent)

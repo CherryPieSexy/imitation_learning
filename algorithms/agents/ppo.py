@@ -54,10 +54,13 @@ class PPO(AgentTrain):
         self.ppo_n_mini_batches = ppo_n_mini_batches
 
     def _policy_loss(self, rollout_t, policy, advantage):
+        if self.normalize_adv:
+            advantage = self._normalize_advantage(advantage)
+
         log_pi_for_actions_old = rollout_t['log_prob']
         actions = rollout_t['actions']
 
-        log_pi_for_actions = self.policy_distribution.log_prob(policy, actions)
+        log_pi_for_actions = self.pi_distribution.log_prob(policy, actions)
         log_prob_ratio = log_pi_for_actions - log_pi_for_actions_old
         log_prob_ratio.clamp_max_(20)
 
@@ -67,7 +70,6 @@ class PPO(AgentTrain):
         else:
             policy_loss = self._clipped_loss(prob_ratio, advantage)
 
-        policy_loss = policy_loss.mean()
         return policy_loss
 
     def _clipped_loss(self, prob_ratio, advantage):
@@ -129,7 +131,7 @@ class PPO(AgentTrain):
 
         policy_loss = self._policy_loss(rollout_t, policy, advantage).mean()
         value_loss = self._value_loss(rollout_t, value, returns).mean()
-        entropy = self.policy_distribution.entropy(policy, actions).mean()
+        entropy = self.pi_distribution.entropy(policy, actions).mean()
 
         # augmentation loss is already reduced inside 'super' class
         aug_loss, aug_dict = self._image_augmentation_loss(rollout_t, policy, value)
@@ -158,12 +160,13 @@ class PPO(AgentTrain):
         # so it is unnecessary to recompute adv at the first train-op
         if self.recompute_advantage and step != 0:
             # to compute returns and advantage we _have_ to call nn.forward(...) on full data
-            policy, value, returns, advantage = self._compute_returns(
-                observations,
+            policy, value = self._get_policy_value(observations)
+            returns, advantage = self._compute_returns_advantage(
+                value,
                 rollout_t['rewards'],
                 rollout_t['is_done']
             )
-            policy, value = policy[row, col], value[row, col]
+            policy, value = policy[:-1][row, col], value[:-1][row, col]
         else:
             # here we can call nn.forward(...) only on interesting data
             # observations[row, col] has only batch dimension =>
@@ -173,8 +176,7 @@ class PPO(AgentTrain):
                 roi_observations = {key: value.unsqueeze(0) for key, value in roi_observations.items()}
             else:
                 roi_observations = observations[row, col].unsqueeze(0)
-            nn_result = self.actor_critic_nn(roi_observations)
-            policy, value = nn_result['policy'], nn_result['value']
+            policy, value = self._get_policy_value(roi_observations)
             policy, value = policy.squeeze(0), value.squeeze(0)
 
         # 2) calculate losses
@@ -185,7 +187,7 @@ class PPO(AgentTrain):
         )
 
         # 3) optimize
-        optimization_result = self.optimize_loss(loss)
+        optimization_result = self._optimize_loss(loss)
         result.update(optimization_result)
 
         return result
@@ -244,23 +246,26 @@ class PPO(AgentTrain):
         instead of call 'agent._train_on_rollout(...)' outside several times,
         but with this approach I have to put rollout on device and
         compute returns and advantage only once (if option 'recompute_advantage' is disabled),
-        which is slow with current GAE implementation.
+        and advantage computing is slow with current GAE implementation.
 
         :param rollout_t:
         :return:
         """
         result_log = defaultdict(float)
-
         mean_epoch_time = 0
-        mean_train_op_time = 0
+        sum_mean_train_op_time = 0
         time_log = dict()
 
         with torch.no_grad():
-            _, _, returns, advantage = self._compute_returns(
-                rollout_t['observations'],
+            _, value = self._get_policy_value(rollout_t['observations'])
+            returns, advantage = self._compute_returns_advantage(
+                value,
                 rollout_t['rewards'],
                 rollout_t['is_done']
             )
+
+        if self.value_normalizer is not None:
+            self.value_normalizer.update(returns)
 
         n = self.ppo_n_epoch
         for ppo_epoch in range(n):
@@ -270,10 +275,11 @@ class PPO(AgentTrain):
             for key, value in epoch_result.items():
                 result_log[key] += value / n
 
+            sum_mean_train_op_time += mean_train_op_time
             mean_epoch_time += epoch_time
 
         time_log['mean_ppo_epoch'] = mean_epoch_time / n
-        time_log['mean_train_op'] = mean_train_op_time / n
+        time_log['mean_train_op'] = sum_mean_train_op_time / n
         return result_log, time_log
 
     def _train_fn(self, rollout):

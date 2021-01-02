@@ -1,14 +1,11 @@
 import pickle
 import argparse
+import importlib
 
-import yaml
-import torch
 import numpy as np
 from tqdm import tqdm, trange
 
 from utils.init_env import init_env
-from algorithms.nn.actor_critic import init_actor_critic
-from algorithms.agents.base_agent import AgentInference
 
 
 def _to_infinity():
@@ -49,9 +46,6 @@ def play_episode(
         actions.append(action)
         rewards.append(reward)
 
-    if not silent:
-        env.render()
-
     episode = (observations[:-1], actions, rewards)
 
     return episode_reward, episode_len, episode
@@ -91,7 +85,7 @@ def play_n_episodes(
         total_episodes += 1
 
         if reward_threshold is not None:
-            if episode_reward > reward_threshold:
+            if episode_reward >= reward_threshold:
                 episodes_to_save.append(episode)
                 save_ep_reward.append(episode_reward)
                 # noinspection PyUnboundLocalVariable
@@ -103,8 +97,8 @@ def play_n_episodes(
 
                     print(
                         f'done! '
-                        f'Saved {len(episodes_to_save)} episodes with mean reward {np.mean(save_ep_reward)} '
-                        f'out of {total_episodes} with mean reward {np.mean(episode_rewards)}'
+                        f'Saved {len(episodes_to_save)} episodes out of {total_episodes};\n'
+                        f'mean reward of saved episodes: {np.mean(save_ep_reward)}\n'
                     )
                     break
 
@@ -120,28 +114,18 @@ def play_n_episodes(
 
 
 def play_from_folder(
-        folder, config_path, checkpoint_path,
+        folder, checkpoint_id,
         deterministic, silent, pause_first, n_episodes,
-        save_gif, reward_threshold, save_demo,
+        reward_threshold, save_demo,
 ):
-    if save_gif:
-        raise ValueError('gif saving is not yet implemented...')
+    config = importlib.import_module(folder.replace('/', '.') + 'config')
 
-    with open(folder + config_path) as f:
-        config = yaml.safe_load(f)
+    test_env = init_env(**config.env_args, env_num=1)
 
-    test_env_args = config['test_env_args']
-    test_env_args['env_num'] = 1
-    test_env = init_env(**test_env_args)
-
-    device = torch.device('cpu')
-    nn_online = init_actor_critic(config['actor_critic_nn_type'], config['actor_critic_nn_args'])
-    nn_online.to(device)
-    policy = config['policy']
-    policy_args = config['policy_args']
-    agent = AgentInference(nn_online, device, policy, policy_args)
-    agent.load(folder + checkpoint_path, map_location='cpu')
+    agent = config.make_agent_online()
+    agent.load(folder + 'checkpoints/' + f'epoch_{checkpoint_id}.pth')
     agent.eval()
+
     play_n_episodes(
         test_env, agent,
         deterministic, n_episodes, silent,
@@ -156,17 +140,13 @@ def parse_args():
     # config + checkpoint part
     parser.add_argument(
         '--folder', '-f',
-        help='this will be added before config and checkpoint paths, default \'\'',
-        default=''
+        help='folder with experiment config and checkpoints',
+        type=str
     )
     parser.add_argument(
-        '--config', '-c',
-        help='path to config which contains agent and environment parameters, default \'config.yaml\'',
-        default='config.yaml'
-    )
-    parser.add_argument(
-        '--checkpoint', '-p',
-        help='path to checkpoint which contains agent weights'
+        '--checkpoint_id', '-p',
+        help='index of checkpoint to load',
+        type=str
     )
 
     # playing episodes part
@@ -177,26 +157,27 @@ def parse_args():
     )
     parser.add_argument(
         '--silent', '-s',
-        help='if True then episodes will not be shown in window, '
+        help='if True then environment will not be rendered '
              'and only mean reward will be printed at the end, default False',
         action='store_true'
     )
     parser.add_argument(
         '--pause_first',
-        help='if True, pauses the first episode at the first frame until enter press. '
-             'It is useful to record video with Kazam or something else, default False',
+        help='if True, pauses the first episode at the first frame until enter pressed. '
+             'It is useful to record video with screen capturing program (i.e. Kazam), '
+             'default False',
         action='store_true'
     )
     parser.add_argument(
         '--n_episodes', '-n',
-        help='number of episodes to play or save demo, default 5',
-        default=5, type=int
+        help='number of episodes to play or save demo, default 10',
+        default=10, type=int
     )
 
     # saving results part
     parser.add_argument(
-        '--save_gif', '-g',
-        help='file name to save gif of played episodes (max 5) into, not yet implemented',
+        '--save_demo', '-d',
+        help='file name to save demo of episodes with reward > \'reward_threshold\' into',
         default=None, type=str, required=False
     )
     parser.add_argument(
@@ -205,11 +186,6 @@ def parse_args():
              'only episodes with reward > \'reward_threshold\' will be saved into buffer',
         default=None, type=float, required=False
     )
-    parser.add_argument(
-        '--save_demo', '-d',
-        help='file name to save demo of episodes with reward > \'reward_threshold\' into',
-        default=None, type=str, required=False
-    )
     return parser.parse_args()
 
 
@@ -217,7 +193,7 @@ if __name__ == '__main__':
     args = parse_args()
 
     play_from_folder(
-        args.folder, args.config, args.checkpoint,
+        args.folder, args.checkpoint_id,
         not args.random, args.silent, args.pause_first, args.n_episodes,
-        args.save_gif, args.reward_threshold, args.save_demo,
+        args.reward_threshold, args.save_demo,
     )

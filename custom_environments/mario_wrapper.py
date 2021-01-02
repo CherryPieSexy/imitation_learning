@@ -10,14 +10,12 @@ class MarioWrapper(gym.Wrapper):
         self.current_score = 0
 
         self.need_reset = True
-        self.last_obs = None
 
         self.no_op = [0] * 9
 
     def step(self, action):
         observation, reward, done, info = self.env.step(action)
         reward /= 10.0
-        self.last_obs = observation
 
         if info['lives'] < self.current_lives:
             done = True
@@ -41,7 +39,7 @@ class MarioWrapper(gym.Wrapper):
 
     def reset(self):
         if self.need_reset:
-            self.last_obs = self.env.reset()
+            observation = self.env.reset()
 
             self.current_lives = 2
             self.current_score = 0
@@ -51,6 +49,7 @@ class MarioWrapper(gym.Wrapper):
             # agent just died, environment shows screen with remaining lives,
             # which is not relevant to training
             for i in range(200):
-                self.last_obs = self.step(self.no_op)[0]
+                observation = self.step(self.no_op)[0]
 
-        return self.last_obs
+        # noinspection PyUnboundLocalVariable
+        return observation

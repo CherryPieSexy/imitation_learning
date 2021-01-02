@@ -5,48 +5,126 @@ from utils.utils import time_it
 from utils.batch_crop import batch_crop
 from algorithms.kl_divergence import kl_divergence
 from algorithms.distributions import distributions_dict
-from algorithms.normalization import RunningMeanStd
 
 
 class AgentInference:
     def __init__(
             self,
-            nn, device,
+            actor_critic,
+            device,
             distribution,
-            distribution_args
+            obs_encoder=None,
+            obs_normalizer=None,
+            reward_normalizer=None,
+            reward_scaler=None,
+            value_normalizer=None,
     ):
-        self.nn = nn
-        self.device = device
-        self.nn.to(device)
-        self.distribution = distributions_dict[distribution](**distribution_args)
-        self.distribution_with_params = False
-        if hasattr(self.distribution, 'has_state'):
-            self.distribution_with_params = True
-            self.distribution.to(device)
-        self.obs_normalizer = None
+        """
+        :param actor_critic: actor-critic neural network: policy, value = nn(obs)
+               obs.size() = (T, B, dim(obs))
+               policy.size() == (T, B, dim(A) or 2 * dim(A))
+               value.size() == (T, B, dim(value))
+        :param device:
+        :param distribution: distribution type, str.
+        :param obs_encoder: observation encoder, nn.Module or None.
+        :param obs_normalizer: observation embedding normalizer,
+                               RunningMeanStd instance or None.
+        :param reward_normalizer: reward normalizer,
+                                  RunningMeanStd instance or None.
+        :param reward_scaler: reward scaler, RunningMeanStd instance or None.
+        :param value_normalizer: value function normalizer,
+                                 RunningMeanStd instance or None.
+        """
+        self.obs_encoder = obs_encoder
+        self.obs_normalizer = obs_normalizer
+        self.reward_normalizer = reward_normalizer
+        self.reward_scaler = reward_scaler
+        self.value_normalizer = value_normalizer
 
-    def load_state_dict(self, state):
-        self.nn.load_state_dict(state['nn'])
-        if self.distribution_with_params:
-            self.distribution.load_state_dict(state['distribution'])
+        self.actor_critic = actor_critic
+        self.device = device
+
+        if self.obs_encoder is not None:
+            self.obs_encoder.to(device)
+        if self.obs_normalizer is not None:
+            self.obs_normalizer.to(device)
+        if self.reward_normalizer is not None:
+            self.reward_normalizer.to(device)
+        if self.reward_scaler is not None:
+            self.reward_scaler.to(device)
+            self.reward_scaler.subtract_mean = False
+
+        # WARNING: value normalizer should be updated
+        # when target value (i.e. returns) is computed.
+        if self.value_normalizer is not None:
+            self.value_normalizer.to(device)
+
+        self.actor_critic.to(device)
+        # WARNING: RealNVP distribution is not supported now.
+        # I got better results with non-trainable distributions.
+        self.pi_distribution_str = distribution
+        self.pi_distribution = distributions_dict[distribution]()
+
+    def state_dict(self):
+        state_dict = {
+            'actor_critic': self.actor_critic.state_dict(),
+            'pi_distribution_str': self.pi_distribution_str
+        }
+        if self.obs_encoder is not None:
+            state_dict.update({'obs_encoder': self.obs_encoder.state_dict()})
+        if self.obs_normalizer is not None:
+            state_dict.update({'obs_normalizer': self.obs_normalizer.state_dict()})
+        if self.reward_normalizer is not None:
+            state_dict.update({'reward_normalizer': self.reward_normalizer.state_dict()})
+        if self.reward_scaler is not None:
+            state_dict.update({'reward_scaler': self.reward_scaler.state_dict()})
+        if self.value_normalizer is not None:
+            state_dict.update({'value_normalizer': self.value_normalizer.state_dict()})
+        return state_dict
+
+    def load_state_dict(self, state_dict):
+        state_pi_distribution = state_dict['pi_distribution_str']
+        if self.pi_distribution_str != state_pi_distribution:
+            raise ValueError(
+                f'different policy distributions in '
+                f'agent {self.pi_distribution_str} '
+                f'and in checkpoint {state_pi_distribution}'
+            )
+        if self.obs_encoder is not None:
+            self.obs_encoder.load_state_dict(state_dict['obs_encoder'])
+        if self.obs_normalizer is not None:
+            self.obs_normalizer.load_state_dict(state_dict['obs_normalizer'])
+        if self.reward_normalizer is not None:
+            self.reward_normalizer.load_state_dict(state_dict['reward_normalizer'])
+        if self.reward_scaler is not None:
+            self.reward_scaler.load_state_dict(state_dict['reward_scaler'])
+        if self.value_normalizer is not None:
+            self.value_normalizer.load_state_dict(state_dict['value_normalizer'])
+        self.actor_critic.load_state_dict(state_dict['actor_critic'])
 
     def load(self, filename, **kwargs):
         checkpoint = torch.load(filename, **kwargs)
-        agent_state = checkpoint['agent']
-        self.load_state_dict(agent_state)
-        if 'obs_normalizer' in checkpoint:
-            self.obs_normalizer = RunningMeanStd()
-            self.obs_normalizer.load_state_dict(checkpoint['obs_normalizer'])
+        self.load_state_dict(checkpoint)
+
+    def save(self, filename):
+        state_dict = self.state_dict()
+        torch.save(state_dict, filename)
 
     def train(self):
-        self.nn.train()
+        if self.obs_encoder is not None:
+            self.obs_encoder.train()
+        self.actor_critic.train()
 
     def eval(self):
-        self.nn.eval()
+        if self.obs_encoder is not None:
+            self.obs_encoder.eval()
+        self.actor_critic.eval()
 
     def _t(self, x):
         # observation may be dict itself (in goal-augmented or multi-part observation envs)
-        if type(x) is dict:
+        if type(x) is torch.Tensor:
+            x_t = x.to(torch.float32)
+        elif type(x) is dict:
             x_t = {
                 key: torch.tensor(value, dtype=torch.float32, device=self.device)
                 for key, value in x.items()
@@ -55,28 +133,40 @@ class AgentInference:
             x_t = torch.tensor(x, dtype=torch.float32, device=self.device)
         return x_t
 
+    def _preprocess_observation(self, observation):
+        observation_t = self._t(observation)
+        if self.obs_encoder is not None:
+            observation_t = self.obs_encoder(observation_t)
+        if self.obs_normalizer is not None:
+            observation_t = self.obs_normalizer(observation_t)
+        return observation_t
+
+    def _get_policy_value(self, observation):
+        observation_t = self._preprocess_observation(observation)
+        actor_critic_result = self.actor_critic(observation_t)
+        policy, value = actor_critic_result['policy'], actor_critic_result['value']
+        if self.value_normalizer is not None:
+            value = self.value_normalizer.denormalize(value)
+        return policy, value
+
     def act(self, observation, deterministic):
         """
+        Method to get an action from the agent.
+
         :param observation: np.array of observation, shape = [B, dim(obs)]
         :param deterministic: default to False, if True then action will be chosen as policy mean
-        :return: action and log_prob, both np.array with shape = [B, dim(action)]
+        :return: dict with policy, value, action and log_prob.
+                 Each entity is an np.array with shape = [B, dim(entity)]
         """
-        if self.obs_normalizer is not None:
-            observation = self.obs_normalizer.normalize(observation)
         with torch.no_grad():
-            if type(observation) is dict:
-                observation = {key: value[None, :] for key, value in observation.items()}
-            else:
-                observation = [observation]
-            nn_result = self.nn(self._t(observation))
-            policy, value = nn_result['policy'], nn_result['value']
+            policy, value = self._get_policy_value(observation)
             # RealNVP requires 'no_grad' here
-            action, log_prob = self.distribution.sample(policy, deterministic)
+            action, log_prob = self.pi_distribution.sample(policy, deterministic)
 
-        policy = policy[0].cpu().numpy()
-        value = value[0].cpu().numpy()
-        action = action[0].cpu().numpy()
-        log_prob = log_prob[0].cpu().numpy()
+        policy = policy.cpu().numpy()
+        value = value.cpu().numpy()
+        action = action.cpu().numpy()
+        log_prob = log_prob.cpu().numpy()
 
         result = {
             'policy': policy, 'value': value,
@@ -84,33 +174,28 @@ class AgentInference:
         }
         return result
 
-    def log_prob(self, observations, actions):
+    def log_prob(self, observation, action):
         with torch.no_grad():
-            nn_result = self.nn(self._t(observations))
-            policy, value = nn_result['policy'], nn_result['value']
-            log_prob = self.distribution.log_prob(policy, self._t(actions))
+            policy, value = self._get_policy_value(observation)
+            log_prob = self.pi_distribution.log_prob(policy, self._t(action))
         result = {
-            'value': value, 'log_prob': log_prob
+            'value': value.cpu().numpy(), 'log_prob': log_prob.cpu().numpy()
         }
         return result
 
 
-# base class trainable agents
-class AgentTrain:
+# base class for trainable agents
+class AgentTrain(AgentInference):
     def __init__(
             self,
-            actor_critic_nn, device,
-            distribution, distribution_args,
-            learning_rate, gamma, entropy, clip_grad,
-            normalize_adv=False, returns_estimator=None,
-            gae_lambda=0.95, image_augmentation_alpha=0.0
+            *args,
+            learning_rate=3e-4, gamma=0.99, entropy=0.0, clip_grad=0.5,
+            normalize_adv=False, returns_estimator='gae',
+            gae_lambda=0.9, image_augmentation_alpha=0.0,
+            **kwargs
     ):
         """
-        :param actor_critic_nn: actor-critic neural network: policy, value = nn(obs)
-               policy.size() == (T, B, dim(A) or 2 * dim(A))
-               value.size() == (T, B)  - there is no '1' at the last dimension!
-        :param distribution: distribution type, str
-        :param distribution_args: distribution arguments, dict. Useful for RealNVP
+        :param *args, **kwargs: AgentInference parameters
         :param normalize_adv: True or False
         :param returns_estimator: '1-step', 'n-step', 'gae'
         :param lr, gamma, entropy, clip_grad: learning hyper-parameters
@@ -118,111 +203,30 @@ class AgentTrain:
         :param image_augmentation_alpha: if > 0 then additional
                                          alpha * D_KL(pi, pi_aug) loss term will be used
         """
-        self.actor_critic_nn = actor_critic_nn
-        self.device = device
+        super().__init__(*args, **kwargs)
+        parameters_to_optimize = self.actor_critic.parameters()
+        if self.obs_encoder is not None:
+            parameters_to_optimize = list(parameters_to_optimize) + \
+                                     list(self.obs_encoder.parameters())
+        self.optimizer = torch.optim.Adam(parameters_to_optimize, learning_rate)
 
-        self.policy_distribution_str = distribution
-        self.policy_distribution = distributions_dict[distribution](**distribution_args)
-
-        self.actor_critic_nn.to(device)
-
-        parameters_to_optimize = self.actor_critic_nn.parameters()
-        self.distribution_with_params = False
-        if hasattr(self.policy_distribution, 'has_state'):
-            self.distribution_with_params = True
-            self.policy_distribution.to(device)
-            parameters_to_optimize = list(parameters_to_optimize) + list(self.policy_distribution.parameters())
-
-        self.opt = torch.optim.Adam(parameters_to_optimize, learning_rate)
+        self.gamma = gamma
+        self.entropy = entropy
+        self.clip_grad = clip_grad
 
         self.normalize_adv = normalize_adv
         self.returns_estimator = returns_estimator
         self.gae_lambda = gae_lambda
-        self.gamma = gamma
-        self.entropy = entropy
-        self.clip_grad = clip_grad
         self.image_augmentation_alpha = image_augmentation_alpha
 
     def state_dict(self):
-        state_dict = {
-            'nn': self.actor_critic_nn.state_dict(),
-            'opt': self.opt.state_dict()
-        }
-        if self.distribution_with_params:
-            state_dict['distribution'] = self.policy_distribution.state_dict()
+        state_dict = super().state_dict()
+        state_dict.update({'optimizer': self.optimizer.state_dict()})
         return state_dict
 
     def load_state_dict(self, state_dict):
-        self.actor_critic_nn.load_state_dict(state_dict['nn'])
-        if self.distribution_with_params:
-            self.policy_distribution.load_state_dict(state_dict['distribution'])
-        self.opt.load_state_dict(state_dict['opt'])
-
-    def save(self, filename, obs_normalizer=None, reward_normalizer=None):
-        """
-        Saves nn and optimizer into a file
-        :param filename: str
-        :param obs_normalizer: RunningMeanStd object
-        :param reward_normalizer: RunningMeanStd object
-        """
-        state_dict = self.state_dict()
-
-        if obs_normalizer is not None:
-            state_dict['obs_normalizer'] = obs_normalizer.state_dict()
-        if reward_normalizer is not None:
-            state_dict['reward_normalizer'] = reward_normalizer.state_dict()
-        torch.save(state_dict, filename)
-
-    def load(self, filename, **kwargs):
-        checkpoint = torch.load(filename, **kwargs)
-        agent_state = checkpoint['agent']
-        self.load_state_dict(agent_state)
-
-    def train(self):
-        self.actor_critic_nn.train()
-
-    def eval(self):
-        self.actor_critic_nn.eval()
-
-    def _t(self, x):
-        # observation may be dict itself (in goal-augmented or multipart observation envs)
-        if type(x) is dict:
-            x_t = {
-                key: torch.tensor(value, dtype=torch.float32, device=self.device)
-                for key, value in x.items()
-            }
-        elif type(x) is torch.Tensor:
-            x_t = x.clone().detach()
-        else:
-            x_t = torch.tensor(x, dtype=torch.float32, device=self.device)
-        return x_t
-
-    def act(self, observation, deterministic=False):
-        """Method to get an action from the agent.
-
-        :param observation: np.array of observation, shape = [B, dim(obs)]
-        :param deterministic: default to False, if True then action will be chosen as policy mean
-        :return: action and log_prob, both np.array with shape = [B, dim(action)]
-        """
-        with torch.no_grad():
-            if type(observation) is dict:
-                observation = {key: [value] for key, value in observation.items()}
-            else:
-                observation = [observation]
-            nn_result = self.actor_critic_nn(self._t(observation))
-            policy, value = nn_result['policy'], nn_result['value']
-            action, log_prob = self.policy_distribution.sample(policy, deterministic)
-
-        policy = policy[0].cpu().numpy()
-        value = value[0].cpu().numpy()
-        action = action[0].cpu().numpy()
-        log_prob = log_prob[0].cpu().numpy()
-
-        result = {
-            'policy': policy, 'value': value,
-            'action': action, 'log_prob': log_prob,
-        }
-        return result
+        super().load_state_dict(state_dict)
+        self.optimizer.load_state_dict(state_dict['optimizer'])
 
     def _one_step_returns(self, next_value, rewards, not_done):
         returns = rewards + self.gamma * not_done * next_value
@@ -266,27 +270,38 @@ class AgentTrain:
     @staticmethod
     def _normalize_advantage(advantage):
         # advantages normalized across batch dimension, I think this is correct
-        mean = advantage.mean(dim=1, keepdim=True)
-        std = advantage.std(dim=1, keepdim=True)
+        mean = advantage.mean()
+        std = advantage.std()
         advantage = (advantage - mean) / (std + 1e-8)
         return advantage
 
-    def optimize_loss(self, loss):
-        self.opt.zero_grad()
+    def _optimize_loss(self, loss):
+        self.optimizer.zero_grad()
         loss.backward()
-        gradient_norm = clip_grad_norm_(
-            self.actor_critic_nn.parameters(), self.clip_grad
+        # actor_critic_grad_norm = clip_grad_norm_(
+        #     self.actor_critic.parameters(), self.clip_grad
+        # )
+        actor_grad_norm = clip_grad_norm_(
+            self.actor_critic.actor.parameters(), self.clip_grad
         )
-        self.opt.step()
-        return {'actor_critic_grad_norm': gradient_norm}
+        critic_grad_norm = clip_grad_norm_(
+            self.actor_critic.critic.parameters(), self.clip_grad
+        )
+        result = {
+            # 'actor_critic_grad_norm': actor_critic_grad_norm,
+            'actor_grad_norm': actor_grad_norm,
+            'critic_grad_norm': critic_grad_norm
+        }
+        if self.obs_encoder is not None:
+            encoder_grad_norm = clip_grad_norm_(
+                self.obs_encoder.parameters(), self.clip_grad
+            )
+            result.update({'encoder_grad_norm': encoder_grad_norm})
+        self.optimizer.step()
+        return result
 
-    def _compute_returns(self, observations, rewards, is_done):
-        # TODO: better name for this function.
-        #  It not only compute returns, but call nn and compute advantage
-        nn_result = self.actor_critic_nn(observations)
-        policy, value = nn_result['policy'], nn_result['value']
-        policy = policy[:-1]
-        value, next_value = value[:-1], value[1:].detach()
+    def _compute_returns_advantage(self, values, rewards, is_done):
+        value, next_value = values[:-1], values[1:].detach()
 
         # reward and not_done must be unsqueezed for correct addition with value
         if len(rewards.size()) == 2:
@@ -295,12 +310,10 @@ class AgentTrain:
             is_done = is_done.unsqueeze(-1)
 
         # returns goes into value loss and so must be kept vectorized to train multi-head critic,
-        # but advantage goes into policy and must be summed along last dim.
+        # but advantage used only for policy update and must be summed along last dim.
         returns = self._estimate_returns(value, next_value, rewards, is_done)
         advantage = (returns - value).sum(-1).detach()
-        if self.normalize_adv:
-            advantage = self._normalize_advantage(advantage)
-        return policy, value, returns, advantage
+        return returns, advantage
 
     def _rollout_to_tensor(self, rollout):
         for key, value in rollout.items():
@@ -310,15 +323,14 @@ class AgentTrain:
     def _train_fn(self, rollout):
         raise NotImplementedError
 
-    def _image_augmentation_loss(self, rollout_t, policy, value):
+    def _image_augmentation_loss(self, observations, policy, value):
         if self.image_augmentation_alpha > 0.0:
-            observations = rollout_t['observations']
             policy, value = policy.detach(), value.detach()
 
             observations_aug = batch_crop(observations)
-            nn_result = self.actor_critic_nn(observations_aug)
-            policy_aug, value_aug = nn_result['policy'], nn_result['value']
-            policy_div = kl_divergence(self.policy_distribution_str, policy, policy_aug).mean()
+            policy_aug, value_aug = self._get_policy_value(observations_aug)
+            policy_aug, value_aug = policy_aug[:-1], value_aug[:-1]
+            policy_div = kl_divergence(self.pi_distribution_str, policy, policy_aug).mean()
             value_div = 0.5 * ((value - value_aug) ** 2).mean()
             augmentation_loss = self.image_augmentation_alpha * (policy_div + value_div)
             result_dict = {
@@ -329,12 +341,44 @@ class AgentTrain:
         else:
             return 0.0, dict()
 
-    def train_on_rollout(self, rollout):
-        train_fn_result, train_fn_time = time_it(self._train_fn)(rollout)
-        if isinstance(train_fn_result, tuple):
-            result_log, time_log = train_fn_result
-        else:  # i.e. result is one dict
-            result_log = train_fn_result
-            time_log = dict()
-        time_log['train_on_rollout'] = train_fn_time
+    def _update_reward_normalizer_scaler(self, rewards, returns):
+        # for reward normalization/scaling after normalizer/scaler update is ok
+        if self.reward_normalizer is not None:
+            rewards_t = self._t(rewards)
+            self.reward_normalizer.update(rewards_t)
+            rewards = self.reward_normalizer(rewards_t)
+
+        if self.reward_scaler is not None:
+            returns_t = self._t(returns)
+            self.reward_scaler.update(returns_t)
+            rewards = self.reward_scaler(returns_t)
+        return rewards
+
+    def _update_obs_normalizer(self, observations):
+        # first normalize observations and then update normalizer
+        # since I mainly focused on on-policy methods
+        if self.obs_normalizer is not None:
+            observation_t = self._t(observations)
+            if self.obs_encoder is not None:
+                observation_t = self.obs_encoder(observation_t)
+            self.obs_normalizer.update(observation_t)
+
+    def train_on_rollout(self, rollout, do_train=True):
+        rollout['rewards'] = self._update_reward_normalizer_scaler(
+            rollout.get('rewards', None), rollout.get('returns', None)
+        )
+
+        if do_train:
+            train_fn_result, train_fn_time = time_it(self._train_fn)(rollout)
+            if isinstance(train_fn_result, tuple):
+                result_log, time_log = train_fn_result
+            else:  # i.e. result is one dict
+                result_log = train_fn_result
+                time_log = dict()
+            time_log['train_on_rollout'] = train_fn_time
+        else:
+            result_log, time_log = {}, {}
+
+        self._update_obs_normalizer(rollout['observations'])
+
         return result_log, time_log
