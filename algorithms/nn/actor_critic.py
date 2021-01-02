@@ -83,6 +83,9 @@ class ActorCriticTwoMLP(nn.Module):
         self.distribution = distribution
 
     def forward(self, observation):
+        if type(observation) is dict:
+            observation = torch.cat([value for _, value in observation.items()])
+
         policy = self.actor(observation)
         value = self.critic(observation)
 

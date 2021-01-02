@@ -19,13 +19,35 @@ class RunningMeanStd(nn.Module):
         return x
 
     def normalize(self, x):
-        return self.forward(x)
+        """
+        This method is used for observation/reward normalization.
+
+        :param x: torch.Tensor or dict of torch.Tensor-s
+        :return: normalized x
+        """
+        if type(x) is dict:
+            x_ = torch.cat([v for k, v in x.items()], dim=-1)
+            shapes = torch.cumsum([0] + [v.shape[1] for k, v in x.items()], dim=-1)
+            slices = {k: (shapes[i], shapes[i + 1]) for i, k in enumerate(x.keys())}
+        else:
+            x_ = x
+
+        x_ = self.forward(x_)
+
+        if type(x) is dict:
+            # noinspection PyUnboundLocalVariable
+            x_ = {k: x_[..., slices[k][0]:slices[k][1]] for k in x.keys()}
+
+        return x_
 
     def denormalize(self, x):
+        # this method is only used for value, dict support is not necessary.
         x = self.mean + x * torch.clamp_min(torch.sqrt(self.var), 1e-6)
         return x
 
     def update(self, x):
+        if type(x) is dict:
+            x = torch.cat([v for _, v in x.items()])
         x_dim = x.size(-1)
         x = x.detach().view(-1, x_dim)
 

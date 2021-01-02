@@ -1,7 +1,9 @@
+import gym
 import torch
 
+import utils.env_wrappers as wrappers
+from utils.vec_env import SubprocVecEnv
 from utils.utils import create_log_dir
-from utils.init_env import init_env
 from algorithms.nn.actor_critic import ActorCriticTwoMLP
 from algorithms.normalization import RunningMeanStd
 from algorithms.agents.base_agent import AgentInference
@@ -15,7 +17,6 @@ distribution = 'Beta'
 device = torch.device('cpu')
 log_dir = 'logs_py/bipedal/exp_0/'
 
-env_args = {'env_type': 'gym', 'env_name': 'BipedalWalker-v3', 'env_args': dict()}
 actor_critic_args = {
     'observation_size': 24, 'hidden_size': 128, 'action_size': 4,
     'distribution': distribution
@@ -29,6 +30,20 @@ train_args = {
     'n_epoch': 20, 'n_steps_per_epoch': 2_000,
     'rollout_len': 64, 'n_tests_per_epoch': 100,
 }
+
+
+def make_env():
+    def make():
+        env = gym.make('BipedalWalker-v3')
+        env = wrappers.ContinuousActionWrapper(env)
+        env = wrappers.ActionRepeatAndRenderWrapper(env)
+        return env
+    return make
+
+
+def make_vec_env(n_envs):
+    vec_env = SubprocVecEnv([make_env() for _ in range(n_envs)])
+    return vec_env
 
 
 def make_agent_online():
@@ -63,8 +78,8 @@ def make_agent_train():
 def main():
     create_log_dir(log_dir, __file__)
 
-    train_env = init_env(**env_args, env_num=train_env_num)
-    test_env = init_env(**env_args, env_num=test_env_num)
+    train_env = make_vec_env(train_env_num)
+    test_env = make_vec_env(test_env_num)
 
     agent_online = make_agent_online()
     agent_train = make_agent_train()

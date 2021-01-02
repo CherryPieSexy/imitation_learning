@@ -5,8 +5,6 @@ import importlib
 import numpy as np
 from tqdm import tqdm, trange
 
-from utils.init_env import init_env
-
 
 def _to_infinity():
     i = 0
@@ -120,7 +118,7 @@ def play_from_folder(
 ):
     config = importlib.import_module(folder.replace('/', '.') + 'config')
 
-    test_env = init_env(**config.env_args, env_num=1)
+    test_env = config.make_env()()
 
     agent = config.make_agent_online()
     agent.load(folder + 'checkpoints/' + f'epoch_{checkpoint_id}.pth')

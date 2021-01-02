@@ -1,29 +1,40 @@
+import torch
 import torch.nn as nn
 
 from algorithms.nn.actor_critic import init
 
 
 def cnn_forward(cnn, observation):
-    with_time = False
-    if observation.dim() == 5:
-        with_time = True
-        obs_size = observation.size()
-        (time, batch), chw = obs_size[:2], obs_size[2:]
-        observation = observation.view(time * batch, *chw)
+    if type(observation) is dict:
+        img = observation.pop('img')
+    else:
+        img = observation
 
-    conv_features = cnn(observation).squeeze(-1).squeeze(-1)
+    with_time = False
+    if img.dim() == 5:
+        with_time = True
+        obs_size = img.size()
+        (time, batch), chw = obs_size[:2], obs_size[2:]
+        img = img.view(time * batch, *chw)
+
+    conv_features = cnn(img)
+    conv_features = conv_features.view(conv_features.size(0), -1)
+
     if with_time:
         # noinspection PyUnboundLocalVariable
         conv_features = conv_features.view(time, batch, -1)
 
+    if type(observation) is dict:
+        observation['features'] = conv_features
+
     return conv_features
 
 
-class ActorCriticCNN(nn.Module):
+class ConvEncoder(nn.Module):
     """
     Simple 3-layer CNN with ReLU activation for images of size (input_channels, 42, 42).
     """
-    def __init__(self, input_channels):
+    def __init__(self, input_channels=4):
         super().__init__()
 
         gain = nn.init.calculate_gain('relu')
@@ -34,28 +45,37 @@ class ActorCriticCNN(nn.Module):
             init(nn.Conv2d(32, 32, kernel_size=3, stride=2), gain=gain), nn.ReLU()
         )
 
+    def forward(self, observation):
+        return cnn_forward(self.conv, observation)
+
 
 class DeepConvEncoder(nn.Module):
     """
-    Deep 6-layer CNN with ReLU activation for images of size (input_channels, 96, 96).
+    "Deep" 6-layer CNN with ReLU activation for images of size (input_channels, 96, 96).
     """
-    def __init__(self):
+    def __init__(self, input_channels=4):
         super().__init__()
         gain = nn.init.calculate_gain('relu')
-        self.conv = nn.Sequential(  # input shape (4, 96, 96)
-            init(nn.Conv2d(4, 8, kernel_size=4, stride=2), gain=gain), nn.ReLU(),
+        # (input_channels, 96, 96) -> (256, 1, 1)
+        self.conv = nn.Sequential(
+            init(nn.Conv2d(input_channels, 8, kernel_size=4, stride=2), gain=gain), nn.ReLU(),
             init(nn.Conv2d(8, 16, kernel_size=3, stride=2), gain=gain), nn.ReLU(),
             init(nn.Conv2d(16, 32, kernel_size=3, stride=2), gain=gain), nn.ReLU(),
             init(nn.Conv2d(32, 64, kernel_size=3, stride=2), gain=gain), nn.ReLU(),
             init(nn.Conv2d(64, 128, kernel_size=3, stride=1), gain=gain), nn.ReLU(),
             init(nn.Conv2d(128, 256, kernel_size=3, stride=1), gain=gain), nn.ReLU()
-        )  # output shape (256, 1, 1)
+        )
 
     def forward(self, observation):
         return cnn_forward(self.conv, observation)
 
 
 class TwoLayerActorCritic(nn.Module):
+    """
+    Two 2-layer MLPs (actor and critic) with ELU activation attached to conv encoder.
+    Both actor and critic may be detached from pytorch computation graph
+    to prevent gradients flowing into encoder.
+    """
     def __init__(
             self,
             input_size, hidden_size, action_size, distribution,
@@ -79,6 +99,9 @@ class TwoLayerActorCritic(nn.Module):
         )
 
     def forward(self, observation):
+        if type(observation) is dict:
+            observation = torch.cat([value for _, value in observation.items()])
+
         # detach prevents gradient flowing into encoder.
         obs_v = obs_pi = observation
         if self.detach_critic:
