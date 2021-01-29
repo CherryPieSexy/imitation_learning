@@ -12,24 +12,23 @@ class AgentTrain:
     """
     def __init__(
             self,
-            *args,
-            model,
+            model, device,
             learning_rate=3e-4, gamma=0.99, entropy=0.0, clip_grad=0.5,
             normalize_adv=False, returns_estimator='gae',
-            gae_lambda=0.9, image_augmentation_alpha=0.0,
-            **kwargs
+            gae_lambda=0.9, image_augmentation_alpha=0.0
     ):
         """
-        :param *args, **kwargs: AgentInference parameters
+        :param model: nn model to train.
+        :param device:
+        :param lr, gamma, entropy, clip_grad: learning hyper-parameters
         :param normalize_adv: True or False
         :param returns_estimator: '1-step', 'n-step', 'gae'
-        :param lr, gamma, entropy, clip_grad: learning hyper-parameters
         :param gae_lambda: gae lambda, optional
         :param image_augmentation_alpha: if > 0 then additional
                                          alpha * D_KL(pi, pi_aug) loss term will be used
         """
-        super().__init__(*args, **kwargs)
         self.model = model
+        self.device = device
         self.optimizer = torch.optim.Adam(self.model.parameters(), learning_rate)
 
         self.gamma = gamma
@@ -40,14 +39,6 @@ class AgentTrain:
         self.returns_estimator = returns_estimator
         self.gae_lambda = gae_lambda
         self.image_augmentation_alpha = image_augmentation_alpha
-
-    def load_model(self, filename, **kwargs):
-        checkpoint = torch.load(filename)
-        self.model.load_state_dict(checkpoint, **kwargs)
-
-    def save_model(self, filename):
-        state_dict = self.model.state_dict()
-        torch.save(state_dict, filename)
 
     def _one_step_returns(self, next_value, rewards, not_done):
         returns = rewards + self.gamma * not_done * next_value
@@ -111,14 +102,15 @@ class AgentTrain:
             self.model.actor_critic.critic.parameters(), self.clip_grad
         )
         result = {
-            'actor_grad_norm': actor_grad_norm,
-            'critic_grad_norm': critic_grad_norm
+            'actor_grad_norm': actor_grad_norm.item(),
+            'critic_grad_norm': critic_grad_norm.item()
         }
         if self.model.obs_encoder is not None:
-            encoder_grad_norm = clip_grad_norm_(
-                self.model.obs_encoder.parameters(), self.clip_grad
-            )
-            result.update({'encoder_grad_norm': encoder_grad_norm})
+            encoder_gradients = {
+                name + '_grad_norm': clip_grad_norm_(child.parameters(), self.clip_grad).item()
+                for name, child in self.model.obs_encoder.named_children()
+            }
+            result.update(encoder_gradients)
         self.optimizer.step()
         return result
 
@@ -186,7 +178,7 @@ class AgentTrain:
             self.model.emb_normalizer.update(observation_t, mask)
 
     def train_on_rollout(self, rollout, do_train=True):
-        rollout.to_tensor(self.model.t)
+        rollout.to_tensor(self.model.t, self.device)
         self._update_reward_normalizer_scaler(rollout)
 
         if do_train:

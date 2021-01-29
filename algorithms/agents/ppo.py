@@ -1,10 +1,9 @@
 from collections import defaultdict
 
 import torch
-import numpy as np
 
 from utils.utils import time_it
-from algorithms.agents.base_agent import AgentTrain
+from algorithms.agents.agent_train import AgentTrain
 
 
 class PPO(AgentTrain):
@@ -14,8 +13,7 @@ class PPO(AgentTrain):
         several training epochs on one rollout,
         splitting rollout into mini-batches,
         policy and (optional) value clipping.
-    In addition this class may use rollback policy loss
-    and can recompute advantage
+    In addition this class may use rollback policy loss.
     """
     def __init__(
             self,
@@ -25,29 +23,23 @@ class PPO(AgentTrain):
             ppo_epsilon=0.2,
             use_ppo_value_loss=False,
             rollback_alpha=0.05,
-            recompute_advantage=False,
             **kwargs
     ):
         """
-        PPO algorithm class
-
-        :param args: PolicyGradient class args
-        :param ppo_n_epoch:         int, number of training epoch on one rollout
+        :param args: AgentTrain class args.
+        :param ppo_n_epoch:         int, number of training epoch on one rollout.
         :param ppo_n_mini_batches:  int, number of mini-batches into which
-                                    the training data is divided during one epoch
-        :param ppo_epsilon:         float, policy (and optionally value) clipping parameter
-        :param use_ppo_value_loss:  bool, switches value loss function
+                                    the training data is divided during one epoch.
+        :param ppo_epsilon:         float, policy (and optionally value) clipping parameter.
+        :param use_ppo_value_loss:  bool, switches value loss function.
                                     from PPO-like clipped (True) or simple MSE (False)
-        :param rollback_alpha:      float, policy-rollback loss parameter
-                                    Rollback is turned on if rollback_alpha > 0
-        :param recompute_advantage: bool, if True the returns and advantage
-                                    will be recomputed after each nn update
-        :param kwargs:
+        :param rollback_alpha:      float, policy-rollback loss parameter.
+                                    Rollback is turned on if rollback_alpha > 0.
+        :param kwargs: AgentTrain class kwargs.
         """
         super().__init__(*args, **kwargs)
         self.ppo_epsilon = ppo_epsilon
         self.use_ppo_value_loss = use_ppo_value_loss
-        self.recompute_advantage = recompute_advantage
         self.rollback_alpha = rollback_alpha
 
         self.ppo_n_epoch = ppo_n_epoch
@@ -60,7 +52,7 @@ class PPO(AgentTrain):
         log_pi_for_actions_old = rollout_t['log_prob']
         actions = rollout_t['actions']
 
-        log_pi_for_actions = self.pi_distribution.log_prob(policy, actions)
+        log_pi_for_actions = self.model.pi_distribution.log_prob(policy, actions)
         log_prob_ratio = log_pi_for_actions - log_pi_for_actions_old
         log_prob_ratio.clamp_max_(20)
 
@@ -111,12 +103,14 @@ class PPO(AgentTrain):
 
         surrogate_1 = (value - returns) ** 2
         surrogate_2 = (clipped_value - returns) ** 2
+        clipped_mse = torch.max(surrogate_1, surrogate_2)
 
-        return 0.5 * torch.max(surrogate_1, surrogate_2)
+        return 0.5 * clipped_mse.mean(-1)
 
     @staticmethod
     def _mse_value_loss(value, returns):
-        return 0.5 * ((value - returns) ** 2)
+        difference_2 = (value - returns) ** 2
+        return 0.5 * (difference_2.mean(-1))
 
     def _value_loss(self, rollout_t, value, returns):
         if self.use_ppo_value_loss:
@@ -126,17 +120,19 @@ class PPO(AgentTrain):
             value_loss = self._mse_value_loss(value, returns)
         return value_loss
 
-    def calculate_loss(self, rollout_t, policy, value, returns, advantage):
-        actions = rollout_t['actions']
+    def calculate_loss(self, rollout_t, policy, value, mask):
+        returns = rollout_t['returns']
+        advantage = rollout_t['advantage']
 
-        policy_loss = self._policy_loss(rollout_t, policy, advantage).mean()
-        value_loss = self._value_loss(rollout_t, value, returns).mean()
-        entropy = self.pi_distribution.entropy(policy, actions).mean()
+        policy_loss = self._average_loss(self._policy_loss(rollout_t, policy, advantage), mask)
+        value_loss = self._average_loss(self._value_loss(rollout_t, value, returns), mask)
+        entropy = self._average_loss(self.model.pi_distribution.entropy(policy), mask)
 
-        # augmentation loss is already reduced inside 'super' class
-        aug_loss, aug_dict = self._image_augmentation_loss(rollout_t, policy, value)
+        # aug_loss, aug_dict = self._image_augmentation_loss(rollout_t, policy, value)
+        aug_loss, aug_dict = 0.0, dict()
 
         loss = value_loss - policy_loss - self.entropy * entropy + aug_loss
+
         loss_dict = {
             'policy_loss': policy_loss.item(),
             'value_loss': value_loss.item(),
@@ -147,131 +143,59 @@ class PPO(AgentTrain):
         return loss, loss_dict
 
     @time_it
-    def _ppo_train_step(
-            self,
-            step,
-            rollout_t, row, col,
-            returns, advantage
-    ):
-        observations = rollout_t['observations']
+    def _ppo_train_step(self, rollout_t, mask, memory):
+        # 1) call nn on accepted data:
+        observations_t = rollout_t['observations']
+        policy, value, _ = self.model(observations_t, memory)
 
-        # 1) call nn, recompute returns and advantage if needed
-        # advantage always computed by training net,
-        # so it is unnecessary to recompute adv at the first train-op
-        if self.recompute_advantage and step != 0:
-            # to compute returns and advantage we _have_ to call nn.forward(...) on full data
-            policy, value = self._get_policy_value(observations)
-            returns, advantage = self._compute_returns_advantage(
-                value,
-                rollout_t['rewards'],
-                rollout_t['is_done']
-            )
-            policy, value = policy[:-1][row, col], value[:-1][row, col]
-        else:
-            # here we can call nn.forward(...) only on interesting data
-            # observations[row, col] has only batch dimension =>
-            # need to unsqueeze and squeeze back
-            if type(observations) is dict:
-                roi_observations = self._select(observations, row, col)
-                roi_observations = {key: value.unsqueeze(0) for key, value in roi_observations.items()}
-            else:
-                roi_observations = observations[row, col].unsqueeze(0)
-            policy, value = self._get_policy_value(roi_observations)
-            policy, value = policy.squeeze(0), value.squeeze(0)
+        # 2) calculate losses:
+        loss, result = self.calculate_loss(rollout_t, policy, value, mask)
 
-        # 2) calculate losses
-        loss, result = self.calculate_loss(
-            self._select_by_row_col(rollout_t, row, col),
-            policy, value,
-            returns[row, col], advantage[row, col]
-        )
-
-        # 3) optimize
+        # 3) optimize:
         optimization_result = self._optimize_loss(loss)
         result.update(optimization_result)
 
         return result
 
-    @staticmethod
-    # observations may be dict and infos are always dict
-    def _select(select_from, row, col):
-        if type(select_from) is dict:
-            return {key: value[row, col] for key, value in select_from.items()}
-        else:
-            return select_from[row, col]
-
-    def _select_by_row_col(self, tensor_dict, row, col):
-        selected = {k: self._select(v, row, col) for k, v in tensor_dict.items()}
-        return selected
-
     @time_it
-    def _ppo_epoch(
-            self,
-            rollout_t, returns, advantage
-    ):
-        # goes once trough rollout
+    def _ppo_epoch(self, data_generator):
         epoch_result = defaultdict(float)
         mean_train_op_time = 0
 
-        # select indices to train on during epoch
-        time, batch = rollout_t['actions'].size()[:2]
-        n_transitions = time * batch
-        flatten_indices = np.arange(n_transitions)
-        np.random.shuffle(flatten_indices)
-
-        num_batches = self.ppo_n_mini_batches
-        batch_size = n_transitions // num_batches
-
-        for step, start_id in enumerate(range(0, n_transitions, batch_size)):
-            indices_to_train_on = flatten_indices[start_id:start_id + batch_size]
-            row = indices_to_train_on // batch
-            col = indices_to_train_on - batch * row
-
-            train_op_result, train_op_time = self._ppo_train_step(
-                step,
-                rollout_t, row, col,
-                returns, advantage
-            )
-
+        for step, data_piece in enumerate(data_generator):
+            rollout_t, mask, memory = data_piece
+            train_op_result, train_op_time = self._ppo_train_step(rollout_t, mask, memory)
             for key, value in train_op_result.items():
-                epoch_result[key] += value / num_batches
+                epoch_result[key] += value / self.ppo_n_mini_batches
             mean_train_op_time += train_op_time
 
-        return epoch_result, mean_train_op_time / num_batches
+        return epoch_result, mean_train_op_time / self.ppo_n_mini_batches
 
-    def _main(self, rollout_t):
-        """
-        It may look a little bit complicated and unreasonable
-        to make this method perform several training epoch
-        instead of call 'agent._train_on_rollout(...)' outside several times,
-        but with this approach I have to put rollout on device and
-        compute returns and advantage only once (if option 'recompute_advantage' is disabled),
-        and advantage computing is slow with current GAE implementation.
+    def _main(self, rollout):
+        rollout_t, memory, mask = rollout.as_dict, rollout.memory, rollout.mask
 
-        :param rollout_t:
-        :return:
-        """
         result_log = defaultdict(float)
         mean_epoch_time = 0
         sum_mean_train_op_time = 0
         time_log = dict()
 
         with torch.no_grad():
-            _, value = self._get_policy_value(rollout_t['observations'])
+            _, value, _ = self.model(rollout_t['observations'], memory)
             returns, advantage = self._compute_returns_advantage(
                 value,
                 rollout_t['rewards'],
                 rollout_t['is_done']
             )
+            rollout.set('returns', returns)
+            rollout.set('advantage', advantage)
 
-        if self.value_normalizer is not None:
-            self.value_normalizer.update(returns)
+        if self.model.value_normalizer is not None:
+            self.model.value_normalizer.update(returns, mask)
 
         n = self.ppo_n_epoch
         for ppo_epoch in range(n):
-            (epoch_result, mean_train_op_time), epoch_time = self._ppo_epoch(
-                rollout_t, returns, advantage
-            )
+            data_generator = rollout.get_data_generator(self.ppo_n_mini_batches)
+            (epoch_result, mean_train_op_time), epoch_time = self._ppo_epoch(data_generator)
             for key, value in epoch_result.items():
                 result_log[key] += value / n
 
@@ -283,39 +207,7 @@ class PPO(AgentTrain):
         return result_log, time_log
 
     def _train_fn(self, rollout):
-        """
-        I moved all logic inside '_main(...)' method except for moving data on tensors
-        and computing loss itself, which is done by 'calculate_loss(...)' method.
-        I did this to make code more modular and in particular to have direct access
-        to main algorithm function (i.e. loss computing and optimizing) for inheritance.
-        It is useful if one want to add rollout pre-processing (for RND, for example)
-        or modify only part of full loss
-
-        :param rollout: dict with at least following keys:
-               'observations', 'rewards', 'is_done',
-               'actions', 'log_prob', 'values'
-               each value in dict is np.array of shape [time, batch, ...]
-               observations of shape [time + 1, batch, ...]
-        :return: (loss_dict, time_dict)
-        """
-        rollout_t = self._rollout_to_tensor(rollout)
         # PPO requires no modifications on rollout
-        result = self._main(rollout_t)
-
+        result = self._main(rollout)
         # it is ok to return tuple of logs here, base class will handle this
         return result
-
-    # TODO: recurrence:
-    #  1) masking in _train_fn
-    #  2) loss averaging, i.e. (mask * loss).sum() / mask.sum()
-    #  3) index select fn, select indices randomly (like now) for feed-forward model,
-    #  4) select only rows for recurrent model. Look how it is done in iKostrikov repo
-
-    @staticmethod
-    def _mask_after_done(done):
-        pad = torch.zeros(done.size(1), dtype=torch.float32, device=done.device)
-        done_sum = torch.cumsum(done, dim=0)[:-1]
-        done_sum = torch.cat([pad, done_sum], dim=0)
-        # noinspection PyTypeChecker
-        mask = 1.0 - done_sum.clamp_max(1.0)
-        return mask
