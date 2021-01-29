@@ -1,59 +1,61 @@
+import gym
 import torch
 
+import utils.env_wrappers as wrappers
+from utils.vec_env import SubprocVecEnv
 from utils.utils import create_log_dir
-from utils.init_env import init_env
+from algorithms.nn.agent_model import AgentModel
 from algorithms.nn.actor_critic import ActorCriticTwoMLP
-from algorithms.agents.base_agent import AgentInference
 from algorithms.agents.a2c import A2C
 from trainers.on_policy import OnPolicyTrainer
 
 
 train_env_num = 4
 test_env_num = 4
-distribution = 'Categorical'
+distribution_str = 'Categorical'
 device = torch.device('cpu')
-log_dir = 'logs_py/cart_pole/a2c_exp_0/'
+log_dir = 'logs_py/cart_pole/a2c/exp_0/'
 
-env_args = {'env_type': 'gym', 'env_name': 'CartPole-v1', 'env_args': dict()}
-actor_critic_args = {
-    'observation_size': 4, 'hidden_size': 16, 'action_size': 2,
-    'distribution': distribution
-}
-agent_train_args = {'learning_rate': 0.01, 'returns_estimator': '1-step'}
-trainer_args = {'warm_up_steps': 10, 'n_plot_agents': 1, 'log_dir': log_dir}
+actor_critic_args = {'input_size': 4, 'hidden_size': 16, 'action_size': 2}
+a2c_args = {'learning_rate': 0.01, 'returns_estimator': '1-step'}
+trainer_args = {'log_dir': log_dir, 'recurrent': False}
 train_args = {
-    'n_epoch': 10, 'n_steps_per_epoch': 100,
-    'rollout_len': 16, 'n_tests_per_epoch': 100
+    'n_epoch': 5, 'n_steps_per_epoch': 500,
+    'rollout_len': 16, 'n_tests_per_epoch': 1
 }
 
 
-def make_agent_online():
-    actor_critic_online = ActorCriticTwoMLP(**actor_critic_args)
-    agent = AgentInference(actor_critic_online, device, distribution)
-    return agent
+def make_env():
+    def make():
+        env = gym.make('CartPole-v1')
+        env = wrappers.ActionRepeatAndRenderWrapper(env)
+        return env
+    return make
 
 
-def make_agent_train():
-    actor_critic_train = ActorCriticTwoMLP(**actor_critic_args)
-    agent = A2C(
-        actor_critic_train, device, distribution,
-        **agent_train_args
-    )
+def make_vec_env(n_envs):
+    vec_env = SubprocVecEnv([make_env() for _ in range(n_envs)])
+    return vec_env
+
+
+def make_model():
+    def make_ac():
+        return ActorCriticTwoMLP(**actor_critic_args)
+    agent = AgentModel(make_ac, distribution_str)
     return agent
 
 
 def main():
     create_log_dir(log_dir, __file__)
 
-    train_env = init_env(**env_args, env_num=train_env_num)
-    test_env = init_env(**env_args, env_num=test_env_num)
+    train_env = make_vec_env(train_env_num)
+    test_env = make_vec_env(test_env_num)
 
-    agent_online = make_agent_online()
-    agent_train = make_agent_train()
-    agent_online.load_state_dict(agent_train.state_dict())
+    model = make_model()
+    agent = A2C(model, device, **a2c_args)
 
     trainer = OnPolicyTrainer(
-        agent_online, agent_train, train_env,
+        agent, train_env,
         **trainer_args,
         test_env=test_env
     )

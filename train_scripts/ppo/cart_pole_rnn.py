@@ -5,33 +5,38 @@ import utils.env_wrappers as wrappers
 from utils.vec_env import SubprocVecEnv
 from utils.utils import create_log_dir
 from algorithms.nn.agent_model import AgentModel
-from algorithms.nn.actor_critic import ActorCriticTwoMLP
+from algorithms.nn.recurrent_encoders import init, CompositeRnnEncoder, OneLayerActorCritic
 from algorithms.agents.ppo import PPO
 from trainers.on_policy import OnPolicyTrainer
 
 
-train_env_num = 32
+# WARNING: this experiment gives bad results.
+train_env_num = 4
 test_env_num = 4
-distribution_str = 'Beta'
+distribution_str = 'Categorical'
 device = torch.device('cpu')
-log_dir = 'logs_py/bipedal/ppo/exp_0/'
+log_dir = 'logs_py/cart_pole/ppo/exp_1_gru/'
 
-actor_critic_args = {'input_size': 24, 'hidden_size': 32, 'action_size': 2 * 4}
+input_size = 4
+hidden_size = 16
+action_size = 2
+
+actor_critic_args = {'input_size': hidden_size, 'action_size': action_size}
 ppo_args = {
-    'ppo_n_epoch': 5, 'ppo_n_mini_batches': 4,
-    'ppo_epsilon': 0.1
+    'learning_rate': 0.001,
+    'ppo_n_epoch': 4, 'ppo_n_mini_batches': 4,
+    'rollback_alpha': 0.1
 }
-trainer_args = {'log_dir': log_dir, 'recurrent': False}
+trainer_args = {'log_dir': log_dir, 'recurrent': True}
 train_args = {
     'n_epoch': 5, 'n_steps_per_epoch': 500,
-    'rollout_len': 16, 'n_tests_per_epoch': 5,
+    'rollout_len': 16, 'n_tests_per_epoch': 1,
 }
 
 
 def make_env():
     def make():
-        env = gym.make('BipedalWalker-v3')
-        env = wrappers.ContinuousActionWrapper(env)
+        env = gym.make('CartPole-v1')
         env = wrappers.ActionRepeatAndRenderWrapper(env)
         return env
     return make
@@ -42,14 +47,23 @@ def make_vec_env(n_envs):
     return vec_env
 
 
+def make_encoder():
+    def make():
+        gain = torch.nn.init.calculate_gain('tanh')
+        enc_ = torch.nn.Sequential(
+            init(torch.nn.Linear(input_size, hidden_size), gain=gain),
+            torch.nn.Tanh()
+        )
+        return enc_
+    return CompositeRnnEncoder(make, hidden_size, hidden_size)
+
+
 def make_model():
     def make_ac():
-        return ActorCriticTwoMLP(**actor_critic_args)
+        return OneLayerActorCritic(**actor_critic_args)
     model = AgentModel(
         make_ac, distribution_str,
-        make_obs_normalizer=True,
-        make_reward_normalizer=True,
-        make_value_normalizer=True
+        make_obs_encoder=make_encoder
     )
     return model
 
