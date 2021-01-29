@@ -15,7 +15,7 @@ class Distribution:
     def log_prob(self, parameters, sample):
         raise NotImplementedError
 
-    def entropy(self, *args, **kwargs):
+    def entropy(self, parameters):
         raise NotImplementedError
 
 
@@ -39,7 +39,7 @@ class Categorical(Distribution):
         log_prob = distribution.log_prob(sample)
         return log_prob
 
-    def entropy(self, parameters, *args, **kwargs):
+    def entropy(self, parameters):
         logits = parameters
         distribution = self.dist_fn(logits=logits)
         entropy = distribution.entropy()
@@ -84,8 +84,8 @@ class Bernoulli(Categorical):
         log_prob = super().log_prob(parameters, sample)
         return log_prob.sum(-1)
 
-    def entropy(self, *args, **kwargs):
-        entropy = super().entropy(*args, **kwargs)
+    def entropy(self, parameters):
+        entropy = super().entropy(parameters)
         return entropy.sum(-1)
 
 
@@ -142,7 +142,7 @@ class Beta(Distribution):
         log_prob = distribution.log_prob(z)
         return log_prob.sum(-1)
 
-    def entropy(self, parameters, *args, **kwargs):
+    def entropy(self, parameters):
         # entropy changes because of rescaling:
         # H(y) = H(x) + log(2.0)
         alpha, beta = self._convert_parameters(parameters)
@@ -172,7 +172,6 @@ def convert_parameters_normal(parameters):
     mean, log_sigma = parameters.split(half, -1)
     log_sigma_clamp = torch.clamp(log_sigma, -20, +2)
     sigma = log_sigma_clamp.exp()
-    # sigma = torch.nn.functional.softplus(log_sigma + 0.5)
     return mean, sigma
 
 
@@ -219,8 +218,8 @@ class TanhNormal(Distribution):
         log_prob = distribution.log_prob(z)
         return log_prob.sum(-1)
 
-    def entropy(self, parameters, sample, **kwargs):
-        log_prob = self.log_prob(parameters, sample)
+    def entropy(self, parameters):
+        sample, log_prob = self.sample(parameters, deterministic=False)
         log_d_tanh = torch.log(1 - sample.pow(2)).sum(-1)
         entropy = -log_prob + log_d_tanh
 
@@ -241,11 +240,58 @@ class Normal(TanhNormal):
     def _agent_to_env(action):
         return action
 
-    def entropy(self, parameters, *args, **kwargs):
+    def entropy(self, parameters):
         mean, sigma = self._convert_parameters(parameters)
         distribution = self.dist_fn(mean, sigma)
         entropy = distribution.entropy()
         return entropy.sum(-1)
+
+
+class TupleDistribution(Distribution):
+    """
+    Special multi-part distribution represented as tuple of distributions.
+    """
+    def __init__(self, distributions, sizes):
+        """
+        :param distributions: list of strings - names of distributions.
+        :param sizes: size (number of parameters) for each distribution.
+        """
+        self._distributions = [distributions_dict[d]() for d in distributions]
+        self._sizes = sizes
+
+    def sample(self, parameters, deterministic):
+        parameter_idx = 0
+        sample, log_prob = [], 0
+        for distribution, size in zip(self._distributions, self._sizes):
+            d_sample, d_log_prob = distribution.sample(
+                parameters[..., parameter_idx:parameter_idx + size],
+                deterministic
+            )
+            sample.append(d_sample)
+            log_prob += d_log_prob
+            parameter_idx += size
+        return tuple(sample), log_prob
+
+    def log_prob(self, parameters, sample):
+        parameter_idx = 0
+        log_prob = 0
+        for distribution, size, d_sample in zip(self._distributions, self._sizes, sample):
+            log_prob += distribution.log_prob(
+                parameters[..., parameter_idx:parameter_idx + size],
+                d_sample
+            )
+            parameter_idx += size
+        return log_prob
+
+    def entropy(self, parameters):
+        parameter_idx = 0
+        entropy = 0
+        for distribution, size in zip(self._distributions, self._sizes):
+            entropy += distribution.entropy(
+                parameters[..., parameter_idx:parameter_idx + size]
+            )
+            parameter_idx += size
+        return entropy
 
 
 distributions_dict = {

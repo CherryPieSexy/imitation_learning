@@ -3,3 +3,6 @@
 logs/*
 logs_py/*
 demo_files/*
+_vizdoom
+_vizdoom.ini
+vizdoom-crash.log

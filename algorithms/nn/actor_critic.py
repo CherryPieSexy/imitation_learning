@@ -14,27 +14,34 @@ def init(
     return module
 
 
-activation_dict = {
+activations_dict = {
     'tanh': nn.Tanh, 'relu': nn.ReLU, 'elu': nn.ELU
 }
 
 
 class MLP(nn.Module):
     """
-    3-layer MLP with no activation at the end.
+    MLP with n-layers and no activation at the end.
     """
     def __init__(
             self,
             input_size, hidden_size, output_size,
-            activation_str='tanh', output_gain=1.0
+            n_layers,
+            activation_str,
+            output_gain
     ):
         super().__init__()
         gain = nn.init.calculate_gain(activation_str)
-        activation = activation_dict[activation_str]
+        activation = activations_dict[activation_str]
+
+        hidden_layers = []
+        for _ in range(n_layers - 2):
+            hidden_layers.append(init(nn.Linear(hidden_size, hidden_size), gain=gain))
+            hidden_layers.append(activation())
 
         self.mlp = nn.Sequential(
             init(nn.Linear(input_size, hidden_size), gain=gain), activation(),
-            init(nn.Linear(hidden_size, hidden_size), gain=gain), activation(),
+            *hidden_layers,
             init(nn.Linear(hidden_size, output_size), gain=output_gain)
         )
 
@@ -53,7 +60,7 @@ class ActorIndependentSigma(nn.Module):
         self.log_std = nn.Parameter(torch.zeros(action_size))
         self.mean = MLP(
             observation_size, hidden_size, action_size,
-            output_gain=0.01
+            n_layers=3, activation_str='tanh', output_gain=0.01
         )
 
     def forward(self, observation):
@@ -63,34 +70,55 @@ class ActorIndependentSigma(nn.Module):
         return policy
 
 
+def actor_critic_forward(actor_critic, observation):
+    if type(observation) is dict:
+        observation = torch.cat([value for _, value in observation.items()], dim=-1)
+
+    # detach prevents gradient flowing into encoder.
+    obs_pi = observation
+    obs_v = observation
+    if actor_critic.detach_actor:
+        obs_pi = obs_pi.detach()
+    if actor_critic.detach_critic:
+        obs_v = obs_v.detach()
+
+    policy = actor_critic.actor(obs_pi)
+    value = actor_critic.critic(obs_v)
+
+    result = {
+        'policy': policy,
+        'value': value,
+    }
+    return result
+
+
 class ActorCriticTwoMLP(nn.Module):
     """
-    Two separate MLP for actor and critic, both with Tanh activation.
+    Two separate MLPs for actor and critic.
+    Both actor and critic may be detached from pytorch computation graph
+    to prevent gradients flowing into encoder.
     """
     def __init__(
             self,
-            observation_size, hidden_size, action_size,
-            distribution,
-            critic_dim=1
+            input_size, hidden_size, action_size,
+            n_layers=3,
+            activation_str='tanh',
+            critic_size=1,
+            detach_actor=False, detach_critic=False
     ):
         super().__init__()
-        self.critic = MLP(observation_size, hidden_size, critic_dim)
 
-        if distribution in ['Beta', 'TanhNormal', 'Normal']:
-            action_size *= 2
-        self.actor = MLP(observation_size, hidden_size, action_size, output_gain=0.01)
+        self.actor = MLP(
+            input_size, hidden_size, action_size,
+            n_layers, activation_str, 0.01
+        )
+        self.critic = MLP(
+            input_size, hidden_size, critic_size,
+            n_layers, activation_str, 1.0
+        )
 
-        self.distribution = distribution
+        self.detach_actor = detach_actor
+        self.detach_critic = detach_critic
 
     def forward(self, observation):
-        if type(observation) is dict:
-            observation = torch.cat([value for _, value in observation.items()])
-
-        policy = self.actor(observation)
-        value = self.critic(observation)
-
-        result = {
-            'policy': policy,
-            'value': value,
-        }
-        return result
+        return actor_critic_forward(self, observation)

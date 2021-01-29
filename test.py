@@ -2,8 +2,12 @@ import pickle
 import argparse
 import importlib
 
+import torch
 import numpy as np
 from tqdm import tqdm, trange
+
+
+device = torch.device('cpu')
 
 
 def _to_infinity():
@@ -14,13 +18,14 @@ def _to_infinity():
 
 
 def play_episode(
-        env, agent,
+        env, model,
         deterministic, silent, pause
 ):
     episode_reward, episode_len = 0.0, 0.
     observations, actions, rewards = [], [], []
 
     obs, done = env.reset(), False
+    memory = None
     observations.append(obs)
 
     if not silent:
@@ -34,8 +39,18 @@ def play_episode(
             act_obs = {key: value[None, :] for key, value in obs.items()}
         else:
             act_obs = [obs]
-        act_result = agent.act(act_obs, deterministic=deterministic)
-        action = act_result['action'][0]
+        act_result = model.act(act_obs, memory, device, deterministic=deterministic)
+        action = act_result['action']
+        if type(action) is tuple:
+            action = tuple([a[0] for a in action])
+        else:
+            action = action[0]
+        memory = act_result['memory']
+        # print(model.pi_distribution.entropy(
+        #     torch.tensor(act_result['policy']), action
+        # ))
+        # print(act_result['policy'])
+
         obs, reward, done, info = env.step(action, render=not silent)
         episode_reward += reward
         episode_len += 1
@@ -50,7 +65,7 @@ def play_episode(
 
 
 def play_n_episodes(
-        env, agent,
+        env, model,
         deterministic,
         n_episodes, silent,
         reward_threshold, save_demo,
@@ -75,7 +90,7 @@ def play_n_episodes(
 
     for i in p_bar:
         episode_reward, episode_len, episode = play_episode(
-            env, agent, deterministic, silent,
+            env, model, deterministic, silent,
             i == 0 and pause_first
         )
         episode_rewards.append(float(episode_reward))
@@ -120,12 +135,14 @@ def play_from_folder(
 
     test_env = config.make_env()()
 
-    agent = config.make_agent_online()
-    agent.load(folder + 'checkpoints/' + f'epoch_{checkpoint_id}.pth')
-    agent.eval()
+    model = config.make_model()
+    checkpoint = torch.load(folder + 'checkpoints/' + f'epoch_{checkpoint_id}.pth')
+    model.load_state_dict(checkpoint)
+    model.to(device)
+    model.eval()
 
     play_n_episodes(
-        test_env, agent,
+        test_env, model,
         deterministic, n_episodes, silent,
         reward_threshold, save_demo,
         pause_first
