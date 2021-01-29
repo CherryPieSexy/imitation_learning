@@ -46,10 +46,6 @@ def play_episode(
         else:
             action = action[0]
         memory = act_result['memory']
-        # print(model.pi_distribution.entropy(
-        #     torch.tensor(act_result['policy']), action
-        # ))
-        # print(act_result['policy'])
 
         obs, reward, done, info = env.step(action, render=not silent)
         episode_reward += reward

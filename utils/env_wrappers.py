@@ -124,7 +124,7 @@ class TimeStepWrapper(gym.ObservationWrapper):
         if len(observation.shape) == 3:
             observation = {'img': observation}
 
-        time_info = [self._time_step / self._max_time]
+        time_info = np.array([self._time_step / self._max_time])
         if type(observation) is dict:
             observation['time_step'] = time_info
         else:
@@ -194,13 +194,13 @@ class ImageEnvWrapper(gym.Wrapper):
     @staticmethod
     def _img_2_gray(img):
         img = np.dot(img[..., :], [0.299, 0.587, 0.114])
-        img = img / 128.0 - 1
         return img
 
     def _process_img(self, img):
         img = img[self._x_start:self._x_end, self._y_start:self._y_end]
         if self._convert_to_gray:
             img = self._img_2_gray(img)
+        img = img / 128.0 - 1
         img = cv2.resize(img, (self._x_size, self._y_size))
         if self._convert_to_gray:
             img = img[..., None]  # add channels dim back
@@ -218,7 +218,7 @@ class ImageEnvWrapper(gym.Wrapper):
         return obs
 
 
-class StateLoadWrapper(gym.Wrapper):
+class SetStateWrapper(gym.Wrapper):
     """
     Works with mujoco environments, useful for resetting environment in some particular state.
     """
@@ -229,9 +229,10 @@ class StateLoadWrapper(gym.Wrapper):
     def step(self, action, **kwargs):
         return self.env.step(action, **kwargs)
 
-    def load_state(self, obs):
+    def set_state(self, obs):
         state = self._obs_to_env_fn(obs)
         self.env.set_state(**state)
+        return True
 
 
 class LastAchievedGoalWrapper(gym.Wrapper):

@@ -219,8 +219,8 @@ def clear_mpi_env_vars():
 def worker(remote, parent_remote, env_fn_wrappers):
     def step_env(env, action):
         ob, reward, done, info = env.step(action)
-        if done:
-            ob = env.reset()
+        # if done:
+        #     ob = env.reset()
         return ob, reward, done, info
 
     parent_remote.close()
@@ -232,6 +232,8 @@ def worker(remote, parent_remote, env_fn_wrappers):
                 remote.send([step_env(env, action) for env, action in zip(envs, data)])
             elif cmd == 'reset':
                 remote.send([env.reset() for env in envs])
+            elif cmd == 'reset_idx':
+                remote.send([env.reset() for env, idx in zip(envs, data) if idx])
             elif cmd == 'render':
                 remote.send([env.render(mode='rgb_array') for env in envs])
             elif cmd == 'close':
@@ -303,6 +305,16 @@ class SubprocVecEnv(VecEnv):
         for remote in self.remotes:
             remote.send(('reset', None))
         obs = [remote.recv() for remote in self.remotes]
+        obs = _flatten_list(obs)
+        return _flatten_obs(obs)
+
+    def reset_ids(self, ids):
+        self._assert_not_closed()
+        ids = np.split(ids, self.nremotes)
+        for remote, reset in zip(self.remotes, ids):
+            if reset:
+                remote.send(('reset_idx', reset))
+        obs = [remote.recv() for remote, reset in zip(self.remotes, ids) if reset]
         obs = _flatten_list(obs)
         return _flatten_obs(obs)
 
