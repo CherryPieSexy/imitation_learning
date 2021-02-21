@@ -69,12 +69,6 @@ class RunningMeanStd(nn.Module):
         self.var = m_2 / total_count
         self.count = total_count
 
-    # def state_dict(self, *args, **kwargs):
-    #     state_dict = super().state_dict(*args, **kwargs)
-    #     # state_dict['clip'] = self.clip
-    #     # state_dict['subtract_mean'] = self.subtract_mean
-    #     return state_dict
-
     # for some reason default method loads only the first element from tensor.
     def _load_from_state_dict(self, state_dict, prefix, *args):
         self.mean = state_dict[prefix + 'mean']
