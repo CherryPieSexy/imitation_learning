@@ -2,6 +2,7 @@ import torch
 
 from algorithms.normalization import RunningMeanStd
 from algorithms.distributions import distributions_dict, TupleDistribution
+from algorithms.real_nvp import RealNVPDistribution
 
 
 class AgentModel(torch.nn.Module):
@@ -18,11 +19,12 @@ class AgentModel(torch.nn.Module):
             make_actor_critic,
             distribution_str,
             distribution_size=None,
-            make_obs_normalizer=False,
+            distribution_args=None,
+            obs_normalizer_size=None,
             make_obs_encoder=None,
-            make_reward_normalizer=False,
-            make_reward_scaler=False,
-            make_value_normalizer=False,
+            reward_normalizer_size=None,
+            reward_scaler_size=None,
+            value_normalizer_size=None,
     ):
         """
         :param device:
@@ -34,22 +36,24 @@ class AgentModel(torch.nn.Module):
                    value.size() == (T, B, dim(value))
         :param distribution_str: distribution type, str or tuple of str.
         :param distribution_size: size (number of parameters) for each distribution.
-        :param make_obs_normalizer: observation normalizer factory, bool.
-                                    normalization is applied to observations.
+        :param distribution_args: arguments for RealNVP distribution.
+        :param obs_normalizer_size: observation normalizer size, None or int.
+                                    If None then no normalization is applied to observations.
         :param make_obs_encoder: observation encoder factory.
-        :param make_reward_normalizer: reward normalizer factory.
-        :param make_reward_scaler: reward scaler factory.
-        :param make_value_normalizer: value function normalizer factory.
+        :param reward_normalizer_size: reward normalizer normalizer size, None or int.
+        :param reward_scaler_size: reward scaler normalizer size, None or int.
+        :param value_normalizer_size: value function normalizer normalizer size, None or int.
         """
         super().__init__()
         self.device = device
-        self.obs_normalizer = self._make(make_obs_normalizer)
+        self.obs_normalizer = self._make_normalizer(obs_normalizer_size)
+        # self.obs_normalizer = RunningMeanStd(size=(24,))
         self.obs_encoder = make_obs_encoder().to(device) if make_obs_encoder is not None else None
-        self.reward_normalizer = self._make(make_reward_normalizer)
-        self.reward_scaler = self._make(make_reward_scaler)
+        self.reward_normalizer = self._make_normalizer(reward_normalizer_size)
+        self.reward_scaler = self._make_normalizer(reward_scaler_size)
         # WARNING: value normalizer should be updated
         # when target value (i.e. returns) is computed.
-        self.value_normalizer = self._make(make_value_normalizer)
+        self.value_normalizer = self._make_normalizer(value_normalizer_size)
 
         self.actor_critic = make_actor_critic().to(device)
 
@@ -58,22 +62,21 @@ class AgentModel(torch.nn.Module):
 
         self.recurrent = hasattr(self.obs_encoder, 'recurrent')
 
-        # WARNING: RealNVP distribution is not supported now.
-        # I got better results with non-trainable distributions.
         self.pi_distribution_str = distribution_str
         if type(distribution_str) is tuple:
             self.pi_distribution = TupleDistribution(distribution_str, distribution_size)
+        elif distribution_str == 'RealNVP':
+            self.pi_distribution = RealNVPDistribution(**distribution_args)
         else:
             self.pi_distribution = distributions_dict[distribution_str]()
 
-    @staticmethod
-    def _make(factory):
-        return RunningMeanStd() if factory else None
+    def _make_normalizer(self, size):
+        return RunningMeanStd(size=(size,)).to(self.device) if size is not None else None
 
     def preprocess_observation(self, observation, hidden_state):
         result = observation
         if self.obs_normalizer is not None:
-            result = self.obs_normalizer.normalize(observation)
+            result = self.obs_normalizer.normalize(result)
         if self.obs_encoder is not None:
             if self.recurrent:
                 result, hidden_state = self.obs_encoder(result, hidden_state)
@@ -111,15 +114,14 @@ class AgentModel(torch.nn.Module):
         observation_t = self.t(observation)
         with torch.no_grad():
             policy, value, memory = self.forward(observation_t, memory)
-        # RealNVP requires sampling with 'no_grad', but it is not supported now anyway.
-        action, log_prob = self.pi_distribution.sample(policy, deterministic)
+            # RealNVP requires sampling with 'no_grad'.
+            action, log_prob = self.pi_distribution.sample(policy, deterministic)
 
         result = {
             'policy': policy, 'value': value,
             'action': action, 'log_prob': log_prob,
             'memory': memory
         }
-        result.update({'memory': memory})
         return result
 
     def reset_memory_by_ids(self, memory, ids):

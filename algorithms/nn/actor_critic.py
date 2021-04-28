@@ -10,7 +10,8 @@ def init(
         gain=1.0
 ):
     weight_init(module.weight, gain=gain)
-    bias_init(module.bias, 0)
+    if hasattr(module, 'bias'):
+        bias_init(module.bias, 0)
     return module
 
 
@@ -116,6 +117,26 @@ class ActorCriticTwoMLP(nn.Module):
             input_size, hidden_size, critic_size,
             n_layers, activation_str, 1.0
         )
+
+        self.detach_actor = detach_actor
+        self.detach_critic = detach_critic
+
+    def forward(self, observation):
+        return actor_critic_forward(self, observation)
+
+
+class ActorCriticInitialized(nn.Module):
+    """
+    Class for already initialized actor & critic networks.
+    """
+    def __init__(
+            self,
+            actor, critic,
+            detach_actor=False, detach_critic=False
+    ):
+        super().__init__()
+        self.actor = actor
+        self.critic = critic
 
         self.detach_actor = detach_actor
         self.detach_critic = detach_critic
