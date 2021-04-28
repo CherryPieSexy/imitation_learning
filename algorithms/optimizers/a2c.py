@@ -5,25 +5,25 @@ from algorithms.optimizers.actor_critic_optimizer import ActorCriticOptimizer
 class A2C(ActorCriticOptimizer):
     def _policy_loss(self, policy, actions, advantage):
         if self.normalize_adv:
-            advantage = advantage - advantage.mean() / (advantage.std() + 1e-8)
+            advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
         log_pi_for_actions = self.model.pi_distribution.log_prob(policy, actions)
         policy_loss = log_pi_for_actions * advantage.detach()
         return policy_loss
 
     @staticmethod
-    def _value_loss(value, returns):
-        difference_2 = (value - returns) ** 2
+    def _value_loss(value, value_target):
+        difference_2 = (value - value_target) ** 2
         value_loss = 0.5 * (difference_2.mean(-1))
         return value_loss
 
     def calculate_loss(self, data_dict, policy, value):
         actions = data_dict['actions']
-        returns = data_dict['returns']
+        value_target = data_dict['value_target']
         advantage = data_dict['advantage']
         mask = data_dict['mask']
 
         policy_loss = self._average_loss(self._policy_loss(policy, actions, advantage), mask)
-        value_loss = self._average_loss(self._value_loss(value, returns), mask)
+        value_loss = self._average_loss(self._value_loss(value, value_target), mask)
         entropy = self._average_loss(self.model.pi_distribution.entropy(policy), mask)
 
         # aug_loss, aug_dict = self._image_augmentation_loss(observations, policy, value)
@@ -43,18 +43,19 @@ class A2C(ActorCriticOptimizer):
     # A2C basically consist of calculation and optimizing loss
     def _main(self, data_dict):
         data_dict = {
-            k: (v.to(torch.float32) if v is not None else None)
+            k: (v.to(torch.float32) if type(v) is torch.Tensor else v)
             for k, v in data_dict.items()
         }
+        data_dict.pop('recurrent')
 
-        policy, value, returns, advantage = self.returns_estimator.policy_value_returns_adv(
+        policy, value, value_target, advantage = self.returns_estimator.policy_value_returns_adv(
             self.model, data_dict
         )
-        data_dict['returns'] = returns
+        data_dict['value_target'] = value_target
         data_dict['advantage'] = advantage
 
         if self.model.value_normalizer is not None:
-            self.model.value_normalizer.update(returns, data_dict['mask'])
+            self.model.value_normalizer.update(value_target, data_dict['mask'])
 
         # policy, value = policy[:-1], value[:-1]
         loss, result = self.calculate_loss(

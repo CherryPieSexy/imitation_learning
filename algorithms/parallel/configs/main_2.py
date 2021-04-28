@@ -12,7 +12,7 @@ from algorithms.optimizers.ppo import PPO
 import algorithms.parallel as parallel
 
 
-log_dir = 'logs_py/parallel/test_20_p/'
+log_dir = 'logs_py/parallel/test_26/'
 recurrent = False
 gamma = 0.99
 train_env_num = 32
@@ -25,7 +25,7 @@ ppo_args = {
     'ppo_n_epoch': 5, 'ppo_n_mini_batches': 4,
     'ppo_epsilon': 0.1
 }
-train_args = {'n_epoch': 5, 'n_steps_per_epoch': 500, 'rollout_len': 64}
+train_args = {'n_epoch': 20, 'n_steps_per_epoch': 500, 'rollout_len': 16}
 
 
 def make_env():
@@ -47,19 +47,23 @@ def make_model():
         return ActorCriticTwoMLP(**actor_critic_args)
     model = AgentModel(
         device, make_ac, distribution_str,
-        make_obs_normalizer=True,  # does not work for some reason -_-
-        make_reward_normalizer=True,
-        make_value_normalizer=True
+        obs_normalizer_size=24,
+        reward_normalizer_size=1,
+        value_normalizer_size=1
     )
     return model
+
+
+def make_optimizer(model):
+    return PPO(model, **ppo_args)
 
 
 def main():
     create_log_dir(log_dir, __file__)
     # create model & optimizer
     model = make_model()
-    model.share_memory()
-    optimizer = PPO(model, **ppo_args)
+    # model.share_memory()
+    # optimizer = PPO(model, **ppo_args)
 
     # create communications
     queue_to_model = mp.Queue()
@@ -84,7 +88,9 @@ def main():
         parallel.TensorBoardWriterProcess, log_dir, queue_to_writer
     )
     optimizer_process = parallel.start_process(
-        parallel.OptimizerProcess, optimizer, queue_to_optimizer, queue_to_writer
+        parallel.OptimizerProcess,
+        model, make_optimizer,
+        queue_to_optimizer, queue_to_writer
     )
 
     # train model

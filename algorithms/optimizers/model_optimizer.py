@@ -24,14 +24,9 @@ class ModelOptimizer:
     def optimize_loss(self, loss):
         self.optimizer.zero_grad()
         loss.backward()
-        gradient_norms = {
-            name + '_grad_norm': torch.nn.utils.clip_grad_norm_(
-                child.parameters(), self.clip_grad
-            ).item()
-            for name, child in self.model.named_children()
-        }
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad)
         self.optimizer.step()
-        return gradient_norms
+        return grad_norm
 
     def state_dict(self):
         return {

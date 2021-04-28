@@ -5,11 +5,13 @@ class TestAgentProcess:
     def __init__(
             self,
             make_env,
+            render,
             queue_to_tester,
             queue_to_model, pipe_from_model,
             queue_to_tb_writer
     ):
         self._make_env = CloudpickleWrapper(make_env)
+        self._render = render
         self._queue_to_tester = queue_to_tester
         self._queue_to_model = queue_to_model
         self._pipe_from_model = pipe_from_model
@@ -30,17 +32,19 @@ class TestAgentProcess:
 
     def play_episode(self, env):
         observation, done = env.reset(), False
+        if self._render:
+            env.render()
         memory = None
         ep_reward, ep_len = 0, 0
 
         while not done:
-            self._queue_to_model.put(('act', 'test_agent', (observation, memory, True)))
+            self._queue_to_model.put(('act', 'test_agent', ([observation], memory, True)))
             act_result = self._pipe_from_model.recv()
-            action = act_result['action']
+            action = act_result['action'][0]
             memory = act_result['memory']
             env_action = self._env_action(action)
 
-            observation, reward, done, info = env.step(env_action)
+            observation, reward, done, info = env.step(env_action, render=self._render)
 
             ep_reward += reward
             ep_len += 1

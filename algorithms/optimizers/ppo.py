@@ -48,7 +48,7 @@ class PPO(ActorCriticOptimizer):
 
     def _policy_loss(self, data_piece, policy, advantage):
         if self.normalize_adv:
-            advantage = advantage - advantage.mean() / (advantage.std() + 1e-8)
+            advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
         log_pi_for_actions_old = data_piece['log_prob']
         actions = data_piece['actions']
@@ -96,38 +96,38 @@ class PPO(ActorCriticOptimizer):
         )
         return policy_loss
 
-    def _clipped_value_loss(self, value_old, value, returns):
+    def _clipped_value_loss(self, value_old, value, value_target):
         # clipped value loss, PPO-style
         clipped_value = value_old + torch.clamp(
             (value - value_old), -self.ppo_epsilon, self.ppo_epsilon
         )
 
-        surrogate_1 = (value - returns) ** 2
-        surrogate_2 = (clipped_value - returns) ** 2
+        surrogate_1 = (value - value_target) ** 2
+        surrogate_2 = (clipped_value - value_target) ** 2
         clipped_mse = torch.max(surrogate_1, surrogate_2)
 
         return 0.5 * clipped_mse.mean(-1)
 
     @staticmethod
-    def _mse_value_loss(value, returns):
-        difference_2 = (value - returns) ** 2
+    def _mse_value_loss(value, value_target):
+        difference_2 = (value - value_target) ** 2
         return 0.5 * (difference_2.mean(-1))
 
-    def _value_loss(self, data_piece, value, returns):
+    def _value_loss(self, data_piece, value, value_target):
         if self.use_ppo_value_loss:
             value_old = data_piece['value']
-            value_loss = self._clipped_value_loss(value_old, value, returns)
+            value_loss = self._clipped_value_loss(value_old, value, value_target)
         else:
-            value_loss = self._mse_value_loss(value, returns)
+            value_loss = self._mse_value_loss(value, value_target)
         return value_loss
 
     def calculate_loss(self, data_piece, policy, value):
-        returns = data_piece['returns']
+        value_target = data_piece['value_target']
         advantage = data_piece['advantage']
         mask = data_piece['mask']
 
         policy_loss = self._average_loss(self._policy_loss(data_piece, policy, advantage), mask)
-        value_loss = self._average_loss(self._value_loss(data_piece, value, returns), mask)
+        value_loss = self._average_loss(self._value_loss(data_piece, value, value_target), mask)
         entropy = self._average_loss(self.model.pi_distribution.entropy(policy), mask)
 
         # aug_loss, aug_dict = self._image_augmentation_loss(rollout_t, policy, value)
@@ -187,14 +187,14 @@ class PPO(ActorCriticOptimizer):
         time_log = dict()
 
         with torch.no_grad():
-            _, value, returns, advantage = self.returns_estimator.policy_value_returns_adv(
+            _, value, value_target, advantage = self.returns_estimator.policy_value_returns_adv(
                 self.model, data_dict
             )
-            data_dict['returns'] = returns
+            data_dict['value_target'] = value_target
             data_dict['advantage'] = advantage
 
         if self.model.value_normalizer is not None:
-            self.model.value_normalizer.update(returns, data_dict['mask'])
+            self.model.value_normalizer.update(value_target, data_dict['mask'])
 
         n = self.ppo_n_epoch
         for ppo_epoch in range(n):

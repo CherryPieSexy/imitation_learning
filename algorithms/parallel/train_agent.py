@@ -5,6 +5,7 @@ import numpy as np
 from tqdm import trange
 
 from utils.utils import time_it
+from utils.vec_env import SubprocVecEnv
 from algorithms.parallel.rollout import Rollout
 
 
@@ -14,8 +15,8 @@ class TrainAgent:
     """
     def __init__(
             self,
-            make_env, gamma,
-            recurrent, log_dir,
+            make_env, train_env_num,
+            gamma, recurrent, log_dir,
             queue_to_model,  # send observation to model
             queue_to_optimizer,  # send rollout to train algo
             pipe_from_model,  # receive actions from online model
@@ -23,7 +24,7 @@ class TrainAgent:
             n_plot_agents=1,
             average_n_episodes=20
     ):
-        self._env = make_env()
+        self._env = SubprocVecEnv([make_env() for _ in range(train_env_num)])
         self._gamma = gamma
         self._model_memory = None
         self._recurrent = recurrent
@@ -99,9 +100,13 @@ class TrainAgent:
             self._plot_agent(i)
 
         self._env_total_reward[i] = 0.0
-        self._env_discounted_return[i] = 0.0
         self._env_episode_len[i] = 0
         self._env_episode_number[i] += 1
+
+    def _reset_discounted_returns(self, done):
+        for i, d in enumerate(done):
+            # in recurrent case it will be probably masked anyway.
+            self._env_discounted_return[i] = 0.0
 
     def _reset_env_and_memory_by_ids(self, observation, reset_ids):
         ids = [i for i, d in enumerate(reset_ids) if d]
@@ -167,12 +172,13 @@ class TrainAgent:
 
         result = {
             'observation': torch.tensor(observation, dtype=torch.float32),
-            'reward': torch.tensor(reward),
+            'reward': torch.tensor(reward, dtype=torch.float32),
             'return': torch.tensor(self._env_discounted_return),
             'done': torch.tensor(done, dtype=torch.float32),
             'info': info,
             **act_result
         }
+        self._reset_discounted_returns(done)
         return result, act_time, env_time
 
     def _gather_rollout(self, observation, rollout_len):

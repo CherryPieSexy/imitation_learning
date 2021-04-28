@@ -4,7 +4,12 @@ import torch.nn.functional as fun
 import torch.distributions as dist
 
 
-from algorithms.real_nvp import RealNVP
+def atanh(x):
+    x = torch.clamp(x, -0.9999, +0.9999)
+    # noinspection PyTypeChecker
+    y = (1.0 + x) / (1.0 - x)
+    y = 0.5 * torch.log(y)
+    return y
 
 
 # Distributions is used to sample actions or states, compute log-probs and entropy
@@ -186,15 +191,6 @@ class TanhNormal(Distribution):
         action = torch.clamp(action, -0.9999, +0.9999)
         return action
 
-    @staticmethod
-    def _env_to_agent(action):
-        # atanh
-        action = torch.clamp(action, -0.9999, +0.9999)
-        # noinspection PyTypeChecker
-        action = (1.0 + action) / (1.0 - action)
-        action = 0.5 * torch.log(action)
-        return action
-
     def mean(self, parameters):
         mean, _ = self._convert_parameters(parameters)
         mean = torch.tanh(mean)
@@ -214,7 +210,7 @@ class TanhNormal(Distribution):
     def log_prob(self, parameters, sample):
         mean, sigma = self._convert_parameters(parameters)
         distribution = self.dist_fn(mean, sigma)
-        z = self._env_to_agent(sample)
+        z = atanh(sample)
         log_prob = distribution.log_prob(z)
         return log_prob.sum(-1)
 
@@ -302,8 +298,7 @@ distributions_dict = {
     'WideBeta': WideBeta,
     'TanhNormal': TanhNormal,
     'Normal': Normal,
-    'RealNVP': RealNVP
 }
 
 # truly continuous
-continuous_distributions = ['Beta', 'WideBeta', 'Normal', 'TanhNormal', 'RealNVP']
+continuous_distributions = ['Beta', 'WideBeta', 'Normal', 'TanhNormal']

@@ -55,11 +55,11 @@ class ActorCriticOptimizer(ModelOptimizer):
         data_dict['rewards'] = rewards_t
         return data_dict
 
-    def _update_obs_normalizer(self, data_dict):
-        # select all observations except the last to correctly sum with mask.
-        observation_t = data_dict.get('observations')[:-1]
-        mask = data_dict.get('mask')
+    def update_obs_normalizer(self, data_dict):
         if self.model.obs_normalizer is not None:
+            # select all observations except the last to correctly sum with mask.
+            observation_t = data_dict.get('observations')[:-1]
+            mask = data_dict.get('mask')
             self.model.obs_normalizer.update(observation_t, mask)
 
     def _train_fn(self, rollout):
@@ -76,6 +76,6 @@ class ActorCriticOptimizer(ModelOptimizer):
             time_log = dict()
         time_log['train_on_rollout'] = train_fn_time
 
-        self._update_obs_normalizer(data_dict)
+        self.update_obs_normalizer(data_dict)
 
         return result_log, time_log
