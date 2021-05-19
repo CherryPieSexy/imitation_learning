@@ -114,7 +114,8 @@ class TrainAgent:
             'reset_memory', 'train_agent', (self._model_memory, reset_ids)
         ))
         self._model_memory = self._pipe_from_model.recv()
-        observation[ids] = self._env.reset_ids(reset_ids)
+        reset_observations = self._env.reset_ids(reset_ids)
+        observation[ids] = torch.tensor(reset_observations, dtype=torch.float32)
         for i, idx in enumerate(reset_ids):
             if idx:
                 self._alive_env[i] = True
@@ -163,7 +164,7 @@ class TrainAgent:
         }
         act_time = time.time() - start_time
         action = act_result['action']
-        self._agent_memory = act_result.pop('memory')
+        self._model_memory = act_result.pop('memory')
 
         env_result, env_time = self._env_step(action)
         observation, reward, done, info = env_result
@@ -229,6 +230,12 @@ class TrainAgent:
         self._queue_to_tb_writer.put((
             'add_scalar', ('train/', self._reward_statistics(rollout), self._gather_steps_done)
         ))
+
+        if self._recurrent:
+            dead = 1.0 - self._alive_env
+            if np.any(dead):
+                observation = self._reset_env_and_memory_by_ids(observation, dead)
+
         return observation
 
     def train(self, n_epoch, n_steps_per_epoch, rollout_len):

@@ -1,6 +1,5 @@
 import torch.multiprocessing as mp
 
-# import algorithms.parallel as parallel
 from algorithms.parallel.model_process import ModelProcess
 from algorithms.parallel.test_agent_process import TestAgentProcess
 from algorithms.parallel.tb_writer_process import TensorBoardWriterProcess
@@ -22,7 +21,8 @@ def run(
         render_test_env,
         make_optimizer,
         train_agent_args, training_args,
-        run_test_process=True
+        run_test_process=True,
+        test_process_act_deterministic=True
 ):
     model = make_model()
     # create communications
@@ -44,7 +44,8 @@ def run(
         test_process = start_process(
             TestAgentProcess, make_env(), render_test_env,
             queue_to_tester, queue_to_model,
-            test_agent_from_model, queue_to_writer
+            test_agent_from_model, queue_to_writer,
+            test_process_act_deterministic
         )
     tb_writer_process = start_process(
         TensorBoardWriterProcess, log_dir, queue_to_writer

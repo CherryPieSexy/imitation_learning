@@ -48,7 +48,9 @@ class Rollout:
         )
         self._mask.append(truncated)
         if self._recurrent:
-            self._mask[-1] = torch.min(self._mask[-1], self._alive_env)
+            self._mask[-1] = torch.min(
+                self._mask[-1], torch.as_tensor(self._alive_env, dtype=torch.float32)
+            )
         self._alive_env = 1.0 - done
 
         x['reward'] = self._unsqueeze(x['reward'])
