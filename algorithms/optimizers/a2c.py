@@ -3,6 +3,10 @@ from algorithms.optimizers.actor_critic_optimizer import ActorCriticOptimizer
 
 
 class A2C(ActorCriticOptimizer):
+    """
+    Advantage Actor Critic.
+    Based on https://arxiv.org/abs/1602.01783
+    """
     def _policy_loss(self, policy, actions, advantage):
         if self.normalize_adv:
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)

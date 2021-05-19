@@ -8,7 +8,9 @@ from algorithms.optimizers.actor_critic_optimizer import ActorCriticOptimizer
 
 
 class PPO(ActorCriticOptimizer):
-    """Proximal Policy Optimization implementation
+    """
+    Proximal Policy Optimization.
+    https://arxiv.org/abs/1707.06347
 
     This class contains core PPO methods:
         several training epochs on one rollout,

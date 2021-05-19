@@ -6,7 +6,12 @@ from algorithms.returns_estimator import ReturnsEstimator
 
 
 class ActorCriticOptimizer(ModelOptimizer):
-    # inherit a2c and ppo from it with definition of train_fn or something
+    """
+    Optimizer for actor-critic models.
+
+    Controls update of neural networks (encoder, actor & critic)
+    and running normalizers (observation, reward, value).
+    """
     def __init__(
             self,
             model,
@@ -79,3 +84,9 @@ class ActorCriticOptimizer(ModelOptimizer):
         self.update_obs_normalizer(data_dict)
 
         return result_log, time_log
+
+    def state_dict(self):
+        return {
+            'ac_model': self.model.state_dict(),
+            'ac_optimizer': self.optimizer.state_dict()
+        }
