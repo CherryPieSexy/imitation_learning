@@ -42,7 +42,7 @@ def _select_col(select_from, col):
 
 
 def _recurrent_data_generator(data_dict, num_sequences):
-    batch = data_dict['mask'].size1
+    batch = data_dict['mask'].size()[1]
     step_size = batch // num_sequences
     batch_indices = np.arange(batch)
     np.random.shuffle(batch_indices)

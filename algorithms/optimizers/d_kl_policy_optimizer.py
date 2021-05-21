@@ -6,6 +6,7 @@ class PolicyOptimizer(ModelOptimizer):
     """
     Simple policy-model optimizer.
 
+    It used by 'Behavioral Cloning from Observations'.
     Accepts distribution / action as target
     and minimize D_KL / MSE between it and policy.
     """

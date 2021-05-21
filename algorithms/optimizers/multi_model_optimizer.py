@@ -24,8 +24,8 @@ class MultiModelOptimizer:
         )
         self._clip_obs_encoder_grad = clip_grad
 
-    def _obs_embedding(self, data_dict, with_grad=True):
-        obs = data_dict['observations']
+    def _obs_embedding(self, data_dict, with_grad=True, obs_key='observations'):
+        obs = data_dict[obs_key]
         if with_grad:
             emb, _ = self._actor_critic_optimizer.model.preprocess_observation(obs, None)
         else:

@@ -6,7 +6,7 @@ from algorithms.distributions import convert_parameters_beta, convert_parameters
 
 def _d_kl_categorical(p, q):
     # categorical distribution parametrized by logits
-    logits_diff = p - q
+    logits_diff = torch.log_softmax(p, dim=-1) - torch.log_softmax(q, dim=-1)
     p_probs = torch.softmax(p, dim=-1)
     d_kl = (p_probs * logits_diff).sum(-1)
     return d_kl
@@ -41,6 +41,11 @@ def _d_kl_beta(p, q):
     dist_q = dist.Beta(alpha_q, beta_q)
     d_kl = dist.kl_divergence(dist_p, dist_q).mean(-1)
     return d_kl
+
+
+# TODO
+def _d_kl_tanh_normal(p, q):
+    pass
 
 
 d_kl_dict = {

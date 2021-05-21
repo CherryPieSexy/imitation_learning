@@ -24,6 +24,7 @@ def run(
         run_test_process=True,
         test_process_act_deterministic=True
 ):
+    print(f'parallel experiment stated in {log_dir}')
     model = make_model()
     # create communications
     queue_to_model = mp.Queue()
@@ -72,6 +73,7 @@ def run(
     finally:
         # kill processes
         train_agent.close()
+        queue_to_optimizer.put(('save', log_dir + 'checkpoints/latest.pth'))
         queue_to_optimizer.put(('close', None))
         optimizer_process.join()
         queue_to_tester.put('close')
