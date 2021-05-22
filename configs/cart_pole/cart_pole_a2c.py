@@ -2,12 +2,12 @@ import gym
 import torch
 import torch.multiprocessing as mp
 
-from torch_rl import utils as wrappers
+import torch_rl.utils.env_wrappers as wrappers
 from torch_rl.utils.utils import create_log_dir
 
-from torch_rl.algorithms import ActorCriticTwoMLP
-from torch_rl.algorithms import AgentModel
-from torch_rl.algorithms import A2C
+from torch_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
+from torch_rl.algorithms.nn.agent_model import AgentModel
+from torch_rl.algorithms.optimizers.a2c import A2C
 
 import torch_rl.algorithms.parallel as parallel
 
