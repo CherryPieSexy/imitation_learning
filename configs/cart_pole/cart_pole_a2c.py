@@ -1,0 +1,66 @@
+import gym
+import torch
+import torch.multiprocessing as mp
+
+from torch_rl import utils as wrappers
+from torch_rl.utils.utils import create_log_dir
+
+from torch_rl.algorithms import ActorCriticTwoMLP
+from torch_rl.algorithms import AgentModel
+from torch_rl.algorithms import A2C
+
+import torch_rl.algorithms.parallel as parallel
+
+
+# WARNING: this config can give stable results. It may converge in 1 or 10 minutes.
+log_dir = 'logs_py/parallel/cart_pole/exp_1_a2c/'
+device = torch.device('cpu')
+recurrent = False
+
+distribution_str = 'Categorical'
+
+ac_args = {'input_size': 4, 'hidden_size': 16, 'action_size': 2}
+a2c_args = {'learning_rate': 0.01, 'returns_estimator': '1-step'}
+train_args = {
+    'train_env_num': 4, 'gamma': 0.99, 'recurrent': recurrent,
+    'log_dir': log_dir, 'n_plot_agents': 0
+}
+training_args = {'n_epoch': 10, 'n_steps_per_epoch': 500, 'rollout_len': 16}
+
+run_test_process = True
+render_test_env = True
+test_process_act_deterministic = False
+
+
+def make_env():
+    def make():
+        env = gym.make('CartPole-v1')
+        env = wrappers.ActionRepeatAndRenderWrapper(env)
+        return env
+    return make
+
+
+def make_ac_model():
+    def make_ac():
+        return ActorCriticTwoMLP(**ac_args)
+    model = AgentModel(device, make_ac, distribution_str)
+    return model
+
+
+def make_optimizer(model):
+    return A2C(model, **a2c_args)
+
+
+def main():
+    create_log_dir(log_dir, __file__)
+    parallel.run(
+        log_dir, make_env, make_ac_model, render_test_env,
+        make_optimizer, train_args, training_args,
+        run_test_process=run_test_process,
+        test_process_act_deterministic=test_process_act_deterministic
+    )
+
+
+if __name__ == '__main__':
+    mp.set_start_method('spawn')
+    main()
