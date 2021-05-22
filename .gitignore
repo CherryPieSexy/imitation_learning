@@ -6,3 +6,5 @@ demo_files/*
 _vizdoom
 _vizdoom.ini
 vizdoom-crash.log
+old_code/*
+configs/*
