@@ -1,8 +1,8 @@
 import torch
 
-from torch_rl.algorithms.normalization import RunningMeanStd
-from torch_rl.algorithms.distributions import distributions_dict, TupleDistribution
-from torch_rl.algorithms.real_nvp import RealNVPDistribution
+from cherry_rl.algorithms.normalization import RunningMeanStd
+from cherry_rl.algorithms.distributions import distributions_dict, TupleDistribution
+from cherry_rl.algorithms.real_nvp import RealNVPDistribution
 
 
 class AgentModel(torch.nn.Module):
@@ -118,7 +118,7 @@ class AgentModel(torch.nn.Module):
             action, log_prob = self.pi_distribution.sample(policy, deterministic)
 
         result = {
-            'policy': policy, 'value': value,
+            # 'policy': policy, 'value': value,
             'action': action, 'log_prob': log_prob,
             'memory': memory
         }

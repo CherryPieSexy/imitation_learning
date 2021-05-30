@@ -1,27 +1,32 @@
 import gym
 import torch
+import torch.nn as nn
 import torch.multiprocessing as mp
 
 import cherry_rl.utils.env_wrappers as wrappers
 from cherry_rl.utils.utils import create_log_dir
 
-from cherry_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
+from cherry_rl.algorithms.nn.recurrent_encoders import init, CompositeRnnEncoder, OneLayerActorCritic
 from cherry_rl.algorithms.nn.agent_model import AgentModel
 from cherry_rl.algorithms.optimizers.ppo import PPO
 
 import cherry_rl.algorithms.parallel as parallel
 
 
-log_dir = 'logs/cart_pole/exp_2_ppo/'
+log_dir = 'logs/cart_pole/exp_4_ppo_gru/'
 device = torch.device('cpu')
-recurrent = False
+recurrent = True
 
 distribution_str = 'Categorical'
 
-ac_args = {'input_size': 4, 'hidden_size': 16, 'action_size': 2}
+observation_size = 4
+hidden_size = 16
+action_size = 2
+
+ac_args = {'input_size': hidden_size, 'action_size': action_size}
 ppo_args = {
     'learning_rate': 0.01, 'returns_estimator': '1-step',
-    'ppo_n_epoch': 4, 'ppo_n_mini_batches': 4,
+    'ppo_n_epoch': 2, 'ppo_n_mini_batches': 4,
     'rollback_alpha': 0.1
 }
 train_args = {
@@ -44,9 +49,21 @@ def make_env():
 
 
 def make_ac_model():
+    def make_encoder():
+        def make_embedding():
+            gain = nn.init.calculate_gain('tanh')
+            embedding = nn.Sequential(
+                init(nn.Linear(observation_size, hidden_size), gain=gain), nn.Tanh(),
+            )
+            return embedding
+        return CompositeRnnEncoder(make_embedding, hidden_size, hidden_size)
+
     def make_ac():
-        return ActorCriticTwoMLP(**ac_args)
-    model = AgentModel(device, make_ac, distribution_str)
+        return OneLayerActorCritic(**ac_args)
+    model = AgentModel(
+        device, make_ac, distribution_str,
+        make_obs_encoder=make_encoder
+    )
     return model
 
 

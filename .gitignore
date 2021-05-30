@@ -1,10 +1,11 @@
 *__pycache__*
 *.pyc
-logs/*
-logs_py/*
+old_logs/logs/*
+old_logs/logs_py/*
 demo_files/*
 _vizdoom
 _vizdoom.ini
 vizdoom-crash.log
 old_code/*
 configs/*
+cherry_rl.egg-info

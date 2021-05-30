@@ -5,25 +5,31 @@ import torch.multiprocessing as mp
 import cherry_rl.utils.env_wrappers as wrappers
 from cherry_rl.utils.utils import create_log_dir
 
+from cherry_rl.algorithms.demo_buffer import TransitionsDemoBuffer
 from cherry_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
 from cherry_rl.algorithms.nn.agent_model import AgentModel
-from cherry_rl.algorithms.optimizers.ppo import PPO
+from cherry_rl.algorithms.nn.inverse_dynamics_model import InverseDynamicsModel
+from cherry_rl.algorithms.optimizers.d_kl_policy_optimizer import PolicyOptimizer
+from cherry_rl.algorithms.optimizers.inverse_dynamics_optimizer import InverseDynamicsOptimizer
+from cherry_rl.algorithms.optimizers.bco import BCO
 
 import cherry_rl.algorithms.parallel as parallel
 
 
-log_dir = 'logs/cart_pole/exp_2_ppo/'
+log_dir = 'logs/cart_pole/exp_5_bco/'
 device = torch.device('cpu')
 recurrent = False
 
 distribution_str = 'Categorical'
 
+demo_file = 'configs/cart_pole/cart_pole_demo_10_ep.pickle'
+
 ac_args = {'input_size': 4, 'hidden_size': 16, 'action_size': 2}
-ppo_args = {
-    'learning_rate': 0.01, 'returns_estimator': '1-step',
-    'ppo_n_epoch': 4, 'ppo_n_mini_batches': 4,
-    'rollback_alpha': 0.1
+idm_args = {
+    'observation_size': 4, 'hidden_size': 16,
+    'action_size': 2, 'distribution_str': distribution_str
 }
+
 train_args = {
     'train_env_num': 4, 'gamma': 0.99, 'recurrent': recurrent,
     'log_dir': log_dir, 'n_plot_agents': 0
@@ -51,7 +57,12 @@ def make_ac_model():
 
 
 def make_optimizer(model):
-    return PPO(model, **ppo_args)
+    policy_optimizer = PolicyOptimizer(model)
+    idm = InverseDynamicsModel(**idm_args)
+    idm_optimizer = InverseDynamicsOptimizer(idm)
+    demo_buffer = TransitionsDemoBuffer(demo_file, 4 * 16)
+    optimizer = BCO(policy_optimizer, idm_optimizer, demo_buffer)
+    return optimizer
 
 
 def main():

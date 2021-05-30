@@ -2,18 +2,20 @@ import gym
 import torch
 import torch.multiprocessing as mp
 
-import torch_rl.utils.env_wrappers as wrappers
-from torch_rl.utils.utils import create_log_dir
+import cherry_rl.utils.env_wrappers as wrappers
+from cherry_rl.utils.utils import create_log_dir
 
-from torch_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
-from torch_rl.algorithms.nn.agent_model import AgentModel
-from torch_rl.algorithms.optimizers.a2c import A2C
+from cherry_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
+from cherry_rl.algorithms.nn.agent_model import AgentModel
+from cherry_rl.algorithms.optimizers.a2c import A2C
 
-import torch_rl.algorithms.parallel as parallel
+import cherry_rl.algorithms.parallel as parallel
 
 
-# WARNING: this config can give stable results. It may converge in 1 or 10 minutes.
-log_dir = 'logs_py/parallel/cart_pole/exp_1_a2c/'
+# WARNING: this config can't give stable results. It may converge in 1 or 10 minutes.
+# Possible reason: parallel training and rollout gathering and off-policy updates.
+# Sequential A2C should converge in ~20 seconds.
+log_dir = 'logs/cart_pole/exp_1_a2c/'
 device = torch.device('cpu')
 recurrent = False
 

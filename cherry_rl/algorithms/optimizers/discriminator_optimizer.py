@@ -1,7 +1,7 @@
 import torch
 from torch.nn.functional import softplus
 
-from torch_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
+from cherry_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
 
 
 reward_functions = {

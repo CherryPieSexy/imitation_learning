@@ -1,7 +1,7 @@
 import torch
 import torch.distributions as dist
 
-from torch_rl.algorithms.distributions import convert_parameters_beta, convert_parameters_normal
+from cherry_rl.algorithms.distributions import convert_parameters_beta, convert_parameters_normal
 
 
 def _d_kl_categorical(p, q):

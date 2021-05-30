@@ -1,5 +1,5 @@
-from torch_rl.algorithms.kl_divergence import kl_divergence
-from torch_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
+from cherry_rl.algorithms.kl_divergence import kl_divergence
+from cherry_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
 
 
 class PolicyOptimizer(ModelOptimizer):

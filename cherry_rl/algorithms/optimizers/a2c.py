@@ -1,5 +1,5 @@
 import torch
-from torch_rl.algorithms.optimizers.actor_critic_optimizer import ActorCriticOptimizer
+from cherry_rl.algorithms.optimizers.actor_critic_optimizer import ActorCriticOptimizer
 
 
 class A2C(ActorCriticOptimizer):
@@ -30,7 +30,6 @@ class A2C(ActorCriticOptimizer):
         value_loss = self._average_loss(self._value_loss(value, value_target), mask)
         entropy = self._average_loss(self.model.pi_distribution.entropy(policy), mask)
 
-        # aug_loss, aug_dict = self._image_augmentation_loss(observations, policy, value)
         aug_loss, aug_dict = 0.0, dict()
 
         loss = value_loss - policy_loss - self.entropy * entropy + aug_loss

@@ -1,8 +1,8 @@
 import torch
 
-from torch_rl.utils.utils import time_it
-from torch_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
-from torch_rl.algorithms.returns_estimator import ReturnsEstimator
+from cherry_rl.utils.utils import time_it
+from cherry_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
+from cherry_rl.algorithms.returns_estimator import ReturnsEstimator
 
 
 class ActorCriticOptimizer(ModelOptimizer):
@@ -39,6 +39,12 @@ class ActorCriticOptimizer(ModelOptimizer):
         gradient_norms['actor_grad_norm'] = torch.nn.utils.clip_grad_norm_(
             self.model.actor_critic.actor.parameters(), self.clip_grad
         ).item()
+
+        if self.model.pi_distribution_str == 'RealNVP':
+            gradient_norms['real_nvp_grad_norm'] = torch.nn.utils.clip_grad_norm_(
+                self.model.pi_distribution.parameters(), self.clip_grad
+            ).item()
+
         gradient_norms['critic_grad_norm'] = torch.nn.utils.clip_grad_norm_(
             self.model.actor_critic.critic.parameters(), self.clip_grad
         ).item()

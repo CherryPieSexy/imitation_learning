@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from torch_rl.algorithms.nn.actor_critic import init, activations_dict
+from cherry_rl.algorithms.nn.actor_critic import init, activations_dict
 
 
 def cnn_forward(cnn, observation):

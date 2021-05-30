@@ -4,9 +4,9 @@ import torch
 import numpy as np
 from tqdm import trange
 
-from torch_rl.utils.utils import time_it
-from torch_rl.utils.vec_env import SubprocVecEnv
-from torch_rl.algorithms.parallel.rollout import Rollout
+from cherry_rl.utils.utils import time_it
+from cherry_rl.utils.vec_env import SubprocVecEnv
+from cherry_rl.algorithms.rollout import Rollout
 
 
 class TrainAgent:

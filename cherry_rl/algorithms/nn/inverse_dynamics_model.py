@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from torch_rl.algorithms.nn.actor_critic import MLP
-from torch_rl.algorithms.distributions import distributions_dict
+from cherry_rl.algorithms.nn.actor_critic import MLP
+from cherry_rl.algorithms.distributions import distributions_dict
 
 
 class InverseDynamicsModel(nn.Module):

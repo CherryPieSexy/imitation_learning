@@ -1,4 +1,4 @@
-from torch_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
+from cherry_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
 
 
 class InverseDynamicsOptimizer(ModelOptimizer):

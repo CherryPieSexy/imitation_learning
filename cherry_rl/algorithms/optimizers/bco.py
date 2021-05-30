@@ -1,7 +1,7 @@
 import torch
 
-from torch_rl.utils.utils import time_it
-from torch_rl.algorithms.optimizers.multi_model_optimizer import MultiModelOptimizer
+from cherry_rl.utils.utils import time_it
+from cherry_rl.algorithms.optimizers.multi_model_optimizer import MultiModelOptimizer
 
 
 class BCO(MultiModelOptimizer):

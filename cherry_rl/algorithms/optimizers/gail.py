@@ -1,6 +1,6 @@
 import torch
 
-from torch_rl.algorithms.optimizers.multi_model_optimizer import MultiModelOptimizer
+from cherry_rl.algorithms.optimizers.multi_model_optimizer import MultiModelOptimizer
 
 
 class GAIL(MultiModelOptimizer):

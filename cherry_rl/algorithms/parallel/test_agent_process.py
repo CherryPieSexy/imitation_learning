@@ -1,4 +1,4 @@
-from torch_rl.utils.vec_env import CloudpickleWrapper
+from cherry_rl.utils.vec_env import CloudpickleWrapper
 
 
 class TestAgentProcess:

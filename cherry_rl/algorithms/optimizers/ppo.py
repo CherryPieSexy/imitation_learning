@@ -2,9 +2,9 @@ from collections import defaultdict
 
 import torch
 
-from torch_rl.utils.utils import time_it
-from torch_rl.algorithms.rollout_shuffler import get_data_generator
-from torch_rl.algorithms.optimizers.actor_critic_optimizer import ActorCriticOptimizer
+from cherry_rl.utils.utils import time_it
+from cherry_rl.algorithms.rollout_shuffler import get_data_generator
+from cherry_rl.algorithms.optimizers.actor_critic_optimizer import ActorCriticOptimizer
 
 
 class PPO(ActorCriticOptimizer):
@@ -132,7 +132,6 @@ class PPO(ActorCriticOptimizer):
         value_loss = self._average_loss(self._value_loss(data_piece, value, value_target), mask)
         entropy = self._average_loss(self.model.pi_distribution.entropy(policy), mask)
 
-        # aug_loss, aug_dict = self._image_augmentation_loss(rollout_t, policy, value)
         aug_loss, aug_dict = 0.0, dict()
 
         loss = value_loss - policy_loss - self.entropy * entropy + aug_loss

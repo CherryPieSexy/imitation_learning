@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from torch_rl.algorithms.nn.actor_critic import init, actor_critic_forward
+from cherry_rl.algorithms.nn.actor_critic import init, actor_critic_forward
 
 
 class GRUEncoder(nn.Module):

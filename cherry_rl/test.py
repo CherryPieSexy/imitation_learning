@@ -145,7 +145,13 @@ def play_from_folder(
     test_env = config.make_env()()
 
     model = config.make_ac_model()
-    checkpoint = torch.load(folder + 'checkpoints/' + f'epoch_{checkpoint_id}.pth')
+    try:
+        checkpoint = torch.load(folder + f'checkpoint.pth')
+    except FileNotFoundError:
+        try:
+            checkpoint = torch.load(folder + 'checkpoints/' + f'epoch_{checkpoint_id}.pth')
+        except FileNotFoundError:
+            raise FileNotFoundError('can\'t locate checkpoint')
     model.load_state_dict(checkpoint['ac_model'])
     model.to(device)
     model.eval()
@@ -169,8 +175,10 @@ def parse_args():
     )
     parser.add_argument(
         '--checkpoint_id', '-p',
-        help='index of checkpoint to load',
-        type=str
+        help='index of checkpoint to load. '
+             'By default this script tries to load folder/checkpoint.pth, '
+             'if it does not exists it will try to load folder/checkpoints/epoch_{p}.pth',
+        default=None, type=str, required=False
     )
 
     # playing episodes part

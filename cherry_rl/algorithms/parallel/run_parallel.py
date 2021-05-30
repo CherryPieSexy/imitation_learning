@@ -1,10 +1,10 @@
 import torch.multiprocessing as mp
 
-from torch_rl.algorithms.parallel.model_process import ModelProcess
-from torch_rl.algorithms.parallel.test_agent_process import TestAgentProcess
-from torch_rl.algorithms.parallel.tb_writer_process import TensorBoardWriterProcess
-from torch_rl.algorithms.parallel.train_agent import TrainAgent
-from torch_rl.algorithms.parallel.optimizer_process import OptimizerProcess
+from cherry_rl.algorithms.parallel.model_process import ModelProcess
+from cherry_rl.algorithms.parallel.test_agent_process import TestAgentProcess
+from cherry_rl.algorithms.parallel.tb_writer_process import TensorBoardWriterProcess
+from cherry_rl.algorithms.parallel.train_agent import TrainAgent
+from cherry_rl.algorithms.parallel.optimizer_process import OptimizerProcess
 
 
 def start_process(cls, *args):

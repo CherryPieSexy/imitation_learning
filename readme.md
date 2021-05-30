@@ -1,27 +1,35 @@
-# Imitation Learning
+# PyTorch Reinforcement and Imitation Learning
 
-This repo contains simple PyTorch implementation of some Reinforcement Learning algorithms:
+This repo contains PyTorch implementation of some Reinforcement and Imitation Learning algorithms:
 - Advantage Actor Critic (A2C) - a synchronous variant of [*A3C*](https://arxiv.org/abs/1602.01783)
 - Proximal Policy Optimization (PPO) - one of the most popular RL algorithms [*PPO*](https://arxiv.org/abs/1707.06347), 
                                [*Truly PPO*](https://arxiv.org/abs/1903.07940), 
                                [*Implementation Matters*](https://arxiv.org/abs/2005.12729), 
                                [*A Large-Scale Empirical Study of PPO*](https://arxiv.org/abs/2006.05990)
-- On-policy Maximum A Posteriori Policy Optimization (V-MPO) - Algorithm that DeepMind used in their last works [*V-MPO*](https://arxiv.org/abs/1909.12238) (not working yet...)
-- Behavior Cloning (BC) - simple technique to clone some expert behaviour into new policy
+- Behavioral Cloning from Observation (BCO) - technique to clone expert behaviour into agent using only expert states,
+                                              [*BCO*](https://arxiv.org/abs/1805.01954)
+- Generative Adversarial Imitation Learning (GAIL) - algorithm to mimic expert policy using discriminator as reward model
+                                              [*GAIL*](https://arxiv.org/abs/1606.03476)
 
-Each algorithm supports vector/image/dict observation spaces and discrete/continuous action spaces. 
-
-## Why repo is called "Imitation Learning"?
-When I started this project and repo, I thought that Imitation Learning would be my main focus, 
-and model-free methods would be used only at the beginning to train 'experts'. 
-However, it appeared that PPO implementation (and its tricks) took more time than I expected. 
-As the result now most of the code is related to PPO, but I am still interested in Imitation Learning and going to add several related algorithms.
+Each algorithm supports vector/image/dict observation spaces and discrete/continuous/tuple action spaces.
+Data gathering and training on it controlled by separate processes,
+parallelism scheme is described in [this file](cherry_rl/algorithms/parallel/readme.md).
+Code is written with focus on on-policy algorithms;
+Recurrent policies also supported.
 
 ## Current Functionality
 
-For now this repo contains some model-free on-policy algorithm implementations: A2C, PPO, V-MPO and BC. 
-Each algorithm supports discrete (Categorical, Bernoulli, GumbelSoftmax) and continuous (Beta, Normal, tanh(Normal)) policy distributions, 
-and vector or image observation environments. Beta and tanh(Normal) works best in my experiments (tested on BipedalWalker and Humanoid environments).
+Each algorithm supports discrete (Categorical, Bernoulli, GumbelSoftmax)
+and continuous (Beta, Normal, tanh(Normal)) policy distributions,
+and there is additional 'Tuple' distribution which can be used for mixing distributions above. 
+For continuous action spaces Beta distribution works best in my experiments
+(tested on BipedalWalker and Humanoid environments).
+
+Environments with vector, image or dict observation spaces are supported.
+Recurrent policies are supported.
+
+Several returns estimation algorithms supported: 1-step, n-step, [*GAE*](https://arxiv.org/abs/1506.02438) and
+V-Trace (Introduced in [*IMPALA*](https://arxiv.org/abs/1802.01561) paper).
 
 As found in paper [*Implementation Matters*](https://arxiv.org/abs/2005.12729), 
 PPO algo works mostly because of "code-level" optimizations. Here I implemented most of them:
@@ -30,37 +38,25 @@ PPO algo works mostly because of "code-level" optimizations. Here I implemented 
 - [x] Reward normalization/scaling & clipping
 - [x] Orthogonal initialization of neural network weights
 - [x] Gradient clipping
-- [ ] Learning rate annealing (will be added)
+- [ ] Learning rate annealing (will be added... sometime)
 
-In addition, I implemented roll-back loss from [*Truly PPO paper*](https://arxiv.org/abs/1903.07940), which works very well, 
-and 'advantage-recompute' option from [*A Large-Scale Empirical Study of PPO paper*](https://arxiv.org/abs/2006.05990). 
+In addition, I implemented roll-back loss from [*Truly PPO paper*](https://arxiv.org/abs/1903.07940), which works well.
 
-For image-observation environments I added special regularization similar to [*CURL paper*](https://arxiv.org/abs/2004.04136), 
-but instead of contrastive loss between features from convolutional feature extractor, 
-I directly minimize D_KL between policies on augmented and non-augmented images.
+## How to use
 
-As for Imitation Learning algorithms, there is only Behavior Cloning for now, but more will be added.
-
-#### Code structure
-    .
-    ├── algorithms
-        ├── agents              # A2C, PPO, V-MPO, BC, any different agent algo...
-        └── ...                 # all different algorithm parts: neural networks, probability distributions, etc.
-    ├── experts                 # checkpoints of trained models, *.pth files with nn model and weights and *.py scripts with model definition.
-    ├── train_scripts           # folder with train sripts.
-        ├── ppo/humanoid.py     # train script for humanoid environment.
-        ├── ...                 # other train configs.
-        └── test.py             # script for testing trained agent.
-    ├── trainers                # implementation of trainers for different algorithms. Trainer is a manager that controls data-collection, model optimization and testing.
-    └── utils                   # all other 'support' functions that does not fit in any other folder.
+Clone the repo, install python module:
+```bash
+git clone https://github.com/CherryPieSexy/imitation_learning.git
+cd imitation_learning/
+pip install -e .
+```
 
 #### Training example
-Each experiment is described in config, look at examples here: [folder](train_scripts).
 
-Example of training PPO agent on CartPole-v1 env:
-
+Each experiment is described in config, look at the [config](configs/cart_pole/cart_pole_ppo_annotated.py).
+To run experiment execute command:
 ```bash
-python train_scripts/ppo/cart_pole.py
+python configs/cart_pole/cart_pole_ppo_annotated.py
 ```
 
 Training results (including training config, tensorboard logs and model checkpoints) will be saved in ```log_dir``` folder.
@@ -70,51 +66,67 @@ Obtained policy:
 ![cartpole](gifs/cartpole.gif)
 
 #### Testing example
-Results of trained policy may be shown with ```train_scripts/test.py``` script. 
+Results of trained policy may be shown with ```cherry_rl/test.py``` script. To run in from any folder execute:
+```bash
+python -m cherry_rl.test -f ${PATH_TO_LOG_DIR} -p ${CHECKPOINT_ID}
+```
 This script is able to: 
 - just show how policy acts in environment
-- measure mean reward and episode len over some number of episodes
+- measure mean reward and episode len over requested number of episodes
 - record demo file with trajectories
 
-Type ```python train_scripts/test.py -h``` in the terminal to see detailed description of available arguments.
+Execute ```python -m cherry_rl.test -h``` to see detailed description of available arguments.
 
-#### Behavior Cloning example
-Demo file for BC is expected to be .pickle with episodes list inside. 
-An episode is a list of \[observations, actions, rewards\], where observations = \[obs_0, obs_1, ..., obs_T\], 
-same for action and rewards.
-
-- Record demo file from trained policy: 
-    ```bash
-    python train_scripts/test.py -f logs/cart_pole/a2c_exp_0/ -p 10 -n 10 -d demo_files/cartpole_demo_10_ep.pickle -t -1 -r
-    ```
-- Prepare config to train BC: [config](train_scripts/bc/cart_pole_10_episodes.py)
-- Run BC training script: 
-    ```bash
-    python train_scripts/bc/cart_pole_10_episodes.py
-    ```
-- ???
-- Enjoy policy:
-    ```bash
-    python train_scripts/test.py -f logs_py/cart_pole/bc_10_episodes/ -p 1
-    ```
+#### Code structure
+    .
+    ├── cherry_rl                        # folder with code
+        ├── algorithms                      # algorithmic part of code
+            ├── nn                          # folder with neural networks definitions.
+                ├── agent_model.py          # special module for agent.
+                └── ...                     # various nn models: actor-critics, convolutional & recurrent encoders.
+            ├── optimizers                  # folder with RL optimizers. Each optimizer shares
+                ├── model_optimizer.py      # base optimizer for all models.
+                ├── actor_critic_optimizer.py
+                └── ...                     # core algorithms: a2c.py, ppo.py, bco.py
+            ├── parallel
+                ├── readme.md               # description of used parallelism scheme
+                └── ...                     # modules responsible for parallel rollout gathering and training.
+            ├── returns_estimator.py        # special module for estimating returns. Supported estimators: 
+            └── ...                         # all other algorithmic modules that does not fit in any other folder. 
+        ├── utils
+            ├── vec_env.py                  # vector env (copy of OpenAI code, but w/o automatic resetting)
+            └── ...                         # environment wrappers and other utils.
+        └── test.py                         # script for watching trained agent and recording demo.
+    ├── configs                             # subfolder name = environment, script name = algo
+        ├── cart_pole
+            ├── cart_pole_demo_10_ep.pickle  # demo file for training BCO or GAIL
+            ├── cart_pole_a2c.py
+            ├── cart_pole_ppo.py
+            ├── cart_pole_ppo_gru.py        # recurrent policy
+            ├── cart_pole_ppo_annotated.py  # ppo training script with comments
+            ├── cart_pole_bco.py
+            └── cart_pole_gail.py
+        ├── bipedal                         # folder with similar scripts as cart_pole
+        ├── humanoid
+        └── car_racing
 
 #### Modular neural network definition
-Each agent have optional 'observation_encoder' and 'observation_normalizer' arguments.
+Each agent have optional ```make_obs_encoder``` and ```obs_normalizer_size``` arguments.
 Observation encoder is an neural network (i.e. nn.Module), it applied directly to observation, typically an image.
-Observation normalizer is an running mean-variance estimator which standardize observations, it applied after encoder. 
-Sometimes actor-critic trains better on such zero-mean unit-variance observations or embeddings.
+Observation normalizer is an running mean-variance estimator which standardize observations, it applied _before_ encoder. 
+Most of times actor-critic trains better on such zero-mean unit-variance observations or embeddings.
 
-To train your own neural network architecture you can just import it in config, 
-initialize it in 'make_agent' function, and pass as 'actor_critic' argument into agent.
+To train your own neural network architecture you can just import or define it in config, 
+initialize it in ```make_ac_model``` function, and pass as ```make_actor_critic``` argument into ```AgentModel```.
 
 #### Trained environments
 GIFs of some of results:
 
-BipedalWalker-v3: mean reward ~333, 0 fails over 1000 episodes, [config](train_scripts/py_configs/bipedal.py).
+BipedalWalker-v3: mean reward ~333, 0 fails over 1000 episodes, [config](old_code/train_scripts/ppo/bipedal.py).
 
 ![bipedal](./gifs/bipedal.gif)
 
-Humanoid-v3: mean reward ~11.3k, 14 fails over 1000 episodes, [config](train_scripts/py_configs/humanoid.py).
+Humanoid-v3: mean reward ~11.3k, 14 fails over 1000 episodes, [config](old_code/train_scripts/ppo/humanoid.py).
 
 ![humanoid](./gifs/humanoid.gif)
 
@@ -123,16 +135,12 @@ which have integration bug that makes environment easier. For academic purposes 
 
 CarRacing-v0: mean reward = 894 ± 32, 26 fails over 100 episodes 
 (episode is considered failed if reward < 900), 
-[config](train_scripts/py_configs/car_racing.py).
+[config](old_code/train_scripts/ppo/car_racing.py).
 
 ![car_racing](gifs/car_racing.gif)
 
-## Current issues
-V-MPO implementation trains slower than A2C. Probably because of not optimal hyper-parameters sampling, need to investigate.
-
 ## Further plans
-- Add logging where it is possible
-- Add Motion Imitation [*DeepMimic paper*](https://arxiv.org/abs/1804.02717) algo
+- Support Normalizing Flow policies
+- Try Motion Imitation [*DeepMimic paper*](https://arxiv.org/abs/1804.02717) algo
 - Add self-play trainer with PPO as backbone algo
-- Support recurrent policies models and training
 - ...
