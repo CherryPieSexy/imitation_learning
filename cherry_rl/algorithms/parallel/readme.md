@@ -1,4 +1,4 @@
-### Parallelism description
+## Parallelism description
 
 There is 4 total processes run in parallel:
 1. Model process - accepts inputs via queue and send result into pipes.
@@ -24,5 +24,5 @@ It manages rollout gathering and all nn-environment interactions:
 * storing gathered rollout and sending it to the optimizer
 * sending 'save' command to optimizer every epoch
 
-### Processes scheme
+## Processes scheme
 ![scheme](scheme.png)
