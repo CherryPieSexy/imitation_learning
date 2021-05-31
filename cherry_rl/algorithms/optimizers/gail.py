@@ -57,6 +57,7 @@ class GAIL(MultiModelOptimizer):
     def train(self, rollout_data_dict):
         demo_data_dict = self._demo_buffer.sample()
         demo_data_dict = self._actor_critic_optimizer.model.t(demo_data_dict)
+        rollout_data_dict = self._actor_critic_optimizer.model.t(rollout_data_dict)
         # we don't need last observation from rollout, just drop it.
         rollout_data_dict['obs_emb'] = self._obs_embedding(rollout_data_dict)[:-1]
         demo_data_dict['obs_emb'] = self._obs_embedding(demo_data_dict)

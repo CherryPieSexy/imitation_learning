@@ -97,6 +97,7 @@ class BCO(MultiModelOptimizer):
     def train(self, rollout_data_dict):
         demo_data_dict = self._demo_buffer.sample()
         demo_data_dict = self._actor_critic_optimizer.model.t(demo_data_dict)
+        rollout_data_dict = self._actor_critic_optimizer.model.t(rollout_data_dict)
         train_fn_result, train_fn_time = time_it(self._train_fn)(rollout_data_dict, demo_data_dict)
         self.update_obs_normalizer(rollout_data_dict)
         self.update_obs_normalizer(demo_data_dict, drop_last=False)

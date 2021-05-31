@@ -77,6 +77,7 @@ class ActorCriticOptimizer(ModelOptimizer):
         raise NotImplementedError
 
     def train(self, data_dict):
+        data_dict = self.model.t(data_dict)
         data_dict = self._update_reward_normalizer_scaler(data_dict)
 
         train_fn_result, train_fn_time = time_it(self._train_fn)(data_dict)
