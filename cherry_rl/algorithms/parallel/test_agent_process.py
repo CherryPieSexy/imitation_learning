@@ -40,7 +40,8 @@ class TestAgentProcess:
         ep_reward, ep_len = 0, 0
 
         while not done:
-            self._queue_to_model.put(('act', 'test_agent', ([observation], memory, self._deterministic)))
+            observation = {k: [v] for k, v in observation.items()} if type(observation) is dict else [observation]
+            self._queue_to_model.put(('act', 'test_agent', (observation, memory, self._deterministic)))
             act_result = self._pipe_from_model.recv()
             action = act_result['action'][0]
             memory = act_result['memory']

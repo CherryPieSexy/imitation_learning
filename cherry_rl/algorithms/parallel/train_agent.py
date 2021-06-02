@@ -1,6 +1,5 @@
 import time
 
-import torch
 import numpy as np
 from tqdm import trange
 
@@ -115,7 +114,12 @@ class TrainAgent:
         ))
         self._model_memory = self._pipe_from_model.recv()
         reset_observations = self._env.reset_ids(reset_ids)
-        observation[ids] = torch.tensor(reset_observations, dtype=torch.float32)
+        # TODO: this MUST be carefully tested.
+        if type(observation) is dict:
+            for k, v in observation.items():
+                v[ids] = reset_observations[k]
+        else:
+            observation[ids] = reset_observations
         for i, idx in enumerate(reset_ids):
             if idx:
                 self._alive_env[i] = True
@@ -172,10 +176,10 @@ class TrainAgent:
         observation = self._done_callback(observation, done)
 
         result = {
-            'observation': torch.tensor(observation, dtype=torch.float32),
-            'reward': torch.tensor(reward, dtype=torch.float32),
-            'return': torch.tensor(self._env_discounted_return),
-            'done': torch.tensor(done, dtype=torch.float32),
+            'observation': observation,
+            'reward': reward,
+            'return': self._env_discounted_return,
+            'done': done,
             'info': info,
             **act_result
         }
@@ -240,7 +244,7 @@ class TrainAgent:
 
     def train(self, n_epoch, n_steps_per_epoch, rollout_len):
         self._queue_to_optimizer.put(('save', self._log_dir + 'checkpoints/epoch_0.pth'))
-        observation = torch.tensor(self._env.reset(), dtype=torch.float32)
+        observation = self._env.reset()
         self._alive_env = np.array([True for _ in range(self._env.num_envs)])
 
         for epoch in range(n_epoch):
