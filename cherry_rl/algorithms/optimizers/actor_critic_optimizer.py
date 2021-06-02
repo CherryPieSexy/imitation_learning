@@ -69,7 +69,11 @@ class ActorCriticOptimizer(ModelOptimizer):
     def update_obs_normalizer(self, data_dict):
         if self.model.obs_normalizer is not None:
             # select all observations except the last to correctly sum with mask.
-            observation_t = data_dict.get('observations')[:-1]
+            observation_t = data_dict.get('observations')
+            if type(observation_t) is dict:
+                observation_t = {k: v[:-1] for k, v in observation_t.items()}
+            else:
+                observation_t = observation_t[:-1]
             mask = data_dict.get('mask')
             self.model.obs_normalizer.update(observation_t, mask)
 

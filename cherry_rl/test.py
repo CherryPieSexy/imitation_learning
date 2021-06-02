@@ -65,7 +65,7 @@ def play_episode(
         rewards.append(reward)
 
     episode = (
-        np.array(observations[:-1], dtype=np.float32),
+        observations[:-1],
         np.array(actions, dtype=np.float32),
         np.array(rewards, dtype=np.float32)
     )

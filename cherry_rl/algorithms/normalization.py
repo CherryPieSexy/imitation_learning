@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 class RunningMeanStd(nn.Module):
@@ -26,8 +27,8 @@ class RunningMeanStd(nn.Module):
         :return: normalized x.
         """
         if type(x) is dict:
-            x_ = torch.cat([v for k, v in x.items()], dim=-1)
-            shapes = torch.cumsum([0] + [v.shape[1] for k, v in x.items()], dim=-1)
+            x_ = torch.cat([v for _, v in x.items()], dim=-1)
+            shapes = np.cumsum([0] + [v.shape[-1] for k, v in x.items()], axis=-1)
             slices = {k: (shapes[i], shapes[i + 1]) for i, k in enumerate(x.keys())}
         else:
             x_ = x
@@ -48,7 +49,7 @@ class RunningMeanStd(nn.Module):
     def update(self, x, mask):
         if self.training:
             if type(x) is dict:
-                x = torch.cat([v for _, v in x.items()])
+                x = torch.cat([v for _, v in x.items()], dim=-1)
             x_dim = x.size(-1)
             x = x.detach().view(-1, x_dim)
             if mask is not None:

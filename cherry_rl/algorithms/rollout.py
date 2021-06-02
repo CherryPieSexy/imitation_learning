@@ -1,9 +1,10 @@
 import torch
+import numpy as np
 
 
 def _env_num(observation):
     if type(observation) is dict:
-        keys = observation.keys()
+        keys = list(observation.keys())
         env_num = observation[keys[0]].shape[0]
     else:
         env_num = observation.shape[0]
@@ -24,7 +25,7 @@ class Rollout:
     _singles = {v: k for k, v in _plurals.items()}
 
     def __init__(self, observation, memory, recurrent):
-        self._initial_observation = observation
+        self._initial_observation = self._x_to_tensor(observation)
         self._initial_memory = memory
         self._recurrent = recurrent
 
@@ -39,7 +40,16 @@ class Rollout:
             return v.unsqueeze(-1)
         return v
 
+    def _x_to_tensor(self, x):
+        if type(x) is np.ndarray:
+            return torch.tensor(x, dtype=torch.float32)
+        elif type(x) is dict:
+            return {k: self._x_to_tensor(v) for k, v in x.items()}
+        else:
+            return x
+
     def append(self, x):
+        x = {k: self._x_to_tensor(v) for k, v in x.items()}
         done, info = x['done'], x['info']
         # info is a tuple of dicts with len = num_envs
         truncated = 1.0 - torch.tensor(

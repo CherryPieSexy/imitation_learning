@@ -9,7 +9,7 @@ from cherry_rl.algorithms.optimizers.actor_critic_optimizer import ActorCriticOp
 
 class PPO(ActorCriticOptimizer):
     """
-    Proximal Policy Optimization.
+    Proximal Policy Optimization with Clipping objective.
     https://arxiv.org/abs/1707.06347
 
     This class contains core PPO methods:

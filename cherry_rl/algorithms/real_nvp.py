@@ -6,8 +6,8 @@ import torch.nn as nn
 from torch.distributions import Normal, Uniform
 
 
-from torch_rl.algorithms.nn.actor_critic import MLP
-from torch_rl.algorithms.distributions import atanh
+from cherry_rl.algorithms.nn.actor_critic import MLP
+from cherry_rl.algorithms.distributions import atanh
 
 
 class CouplingLayer(nn.Module):
