@@ -1,6 +1,7 @@
 # PyTorch Reinforcement and Imitation Learning
 
-This repo contains PyTorch implementation of some Reinforcement and Imitation Learning algorithms:
+This repository contains parallel PyTorch implementation of some Reinforcement and Imitation Learning algorithms:
+A2C, PPO, BCO, GAIL, V-trace. Short description:
 - Advantage Actor Critic (A2C) - a synchronous variant of [*A3C*](https://arxiv.org/abs/1602.01783)
 - Proximal Policy Optimization (PPO) - one of the most popular RL algorithms [*PPO*](https://arxiv.org/abs/1707.06347), 
                                [*Truly PPO*](https://arxiv.org/abs/1903.07940), 
