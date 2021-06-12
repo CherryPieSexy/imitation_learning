@@ -24,7 +24,7 @@ def run(
         run_test_process=True,
         test_process_act_deterministic=True
 ):
-    print(f'parallel experiment stated in {log_dir}')
+    print(f'parallel experiment started in {log_dir}')
     model = make_model()
     # create communications
     queue_to_model = mp.Queue()

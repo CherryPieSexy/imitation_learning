@@ -1,3 +1,6 @@
+from cherry_rl.algorithms.parallel.clone import clone
+
+
 class ModelProcess:
     """
     Model should continuously run in process.
@@ -16,6 +19,7 @@ class ModelProcess:
         self._test_agent_pipe = test_agent_pipe
 
     def send_result(self, sender, result):
+        result = clone(result)
         if sender == 'train_agent':
             self._train_agent_pipe.send(result)
         elif sender == 'test_agent':

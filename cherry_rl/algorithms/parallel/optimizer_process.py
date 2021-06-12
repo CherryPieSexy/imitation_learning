@@ -1,3 +1,6 @@
+from cherry_rl.algorithms.parallel.clone import clone
+
+
 class OptimizerProcess:
     def __init__(
             self,
@@ -10,25 +13,13 @@ class OptimizerProcess:
         self._queue_to_tb_writer = queue_to_tb_writer
         self._steps_done = 0
 
-    def clone(self, x):
-        if x is None:
-            return None
-        elif type(x) is dict:  # rollout, observations
-            return {k: self.clone(v) for k, v in x.items()}
-        elif type(x) is tuple:  # actions
-            return tuple([xx.clone() for xx in x])
-        elif type(x) is bool:  # recurrent flag
-            return x
-        else:
-            return x.clone()  # everything else
-
     def work(self):
         optimizer = self._make_optimizer(self._model)
         try:
             while True:
                 cmd, data = self._input_queue.get()
                 if cmd == 'train':
-                    data_clone = self.clone(data)
+                    data_clone = clone(data)
                     train_logs, time_logs = optimizer.train(data_clone)
                     self._steps_done += 1
                     self._queue_to_tb_writer.put(('add_scalar', ('train/', train_logs, self._steps_done)))
