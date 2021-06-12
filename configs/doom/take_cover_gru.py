@@ -27,7 +27,7 @@ train_env_num = 32
 rollout_len = 32
 
 
-ac_args = {'hidden_size': gru_hidden_size, 'action_size': action_size}
+ac_args = {'input_size': gru_hidden_size, 'action_size': action_size}
 ppo_args = {
     'normalize_adv': True, 'clip_grad': 0.5,
     'returns_estimator': 'v-trace',
