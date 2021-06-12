@@ -15,7 +15,7 @@ from configs.doom.doom_env import Doom
 
 log_dir = 'logs/doom/take_cover/exp_0_ppo/'
 device = torch.device('cuda')
-recurrent = False
+recurrent = True
 
 cnn_output_size = 2304
 gru_hidden_size = 512
@@ -38,7 +38,7 @@ train_args = {
     'train_env_num': train_env_num, 'gamma': gamma, 'recurrent': recurrent,
     'log_dir': log_dir, 'n_plot_agents': 0
 }
-training_args = {'n_epoch': 10, 'n_steps_per_epoch': 500, 'rollout_len': rollout_len}
+training_args = {'n_epoch': 20, 'n_steps_per_epoch': 5000, 'rollout_len': rollout_len}
 
 run_test_process = True
 render_test_env = False
