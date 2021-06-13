@@ -18,14 +18,15 @@ def run(
         log_dir,
         make_env,
         make_model,
-        render_test_env,
+        device,
         make_optimizer,
         train_agent_args, training_args,
         run_test_process=True,
+        render_test_env=True,
         test_process_act_deterministic=True
 ):
     print(f'parallel experiment started in {log_dir}')
-    model = make_model()
+    model = make_model(device)
     # create communications
     queue_to_model = mp.Queue()
     model_to_train_agent, train_agent_from_model = mp.Pipe()

@@ -144,12 +144,14 @@ def play_from_folder(
 
     test_env = config.make_env()()
 
-    model = config.make_ac_model()
+    model = config.make_ac_model(device)
     try:
-        checkpoint = torch.load(folder + f'checkpoint.pth')
+        checkpoint = torch.load(folder + f'checkpoint.pth', map_location='cpu')
     except FileNotFoundError:
         try:
-            checkpoint = torch.load(folder + 'checkpoints/' + f'epoch_{checkpoint_id}.pth')
+            checkpoint = torch.load(
+                folder + 'checkpoints/' + f'epoch_{checkpoint_id}.pth', map_location='cpu'
+            )
         except FileNotFoundError:
             raise FileNotFoundError('can\'t locate checkpoint')
     model.load_state_dict(checkpoint['ac_model'])

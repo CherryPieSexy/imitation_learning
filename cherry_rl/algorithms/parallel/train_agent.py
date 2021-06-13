@@ -113,6 +113,7 @@ class TrainAgent:
             'reset_memory', 'train_agent', (self._model_memory, reset_ids)
         ))
         self._model_memory = self._pipe_from_model.recv()
+        self._model_memory = self._clone(self._model_memory)
         reset_observations = self._env.reset_ids(reset_ids)
         # TODO: this MUST be carefully tested.
         if type(observation) is dict:
@@ -248,7 +249,7 @@ class TrainAgent:
         self._alive_env = np.array([True for _ in range(self._env.num_envs)])
 
         for epoch in range(n_epoch):
-            p_bar = trange(n_steps_per_epoch, ncols=90, desc=f'epoch_{epoch}')
+            p_bar = trange(n_steps_per_epoch, ncols=90, desc=f'epoch_{epoch + 1}')
             for _ in p_bar:
                 observation = self._train_step(observation, rollout_len)
             self._queue_to_optimizer.put(('save', self._log_dir + f'checkpoints/epoch_{epoch + 1}.pth'))

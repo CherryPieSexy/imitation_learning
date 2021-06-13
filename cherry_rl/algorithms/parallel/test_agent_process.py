@@ -1,3 +1,4 @@
+from cherry_rl.algorithms.parallel.clone import clone
 from cherry_rl.utils.vec_env import CloudpickleWrapper
 
 
@@ -44,7 +45,7 @@ class TestAgentProcess:
             self._queue_to_model.put(('act', 'test_agent', (observation, memory, self._deterministic)))
             act_result = self._pipe_from_model.recv()
             action = act_result['action'][0]
-            memory = act_result['memory']
+            memory = clone(act_result['memory'])
             env_action = self._env_action(action)
 
             observation, reward, done, info = env.step(env_action, render=self._render)

@@ -45,7 +45,7 @@ train_args = {
     'train_env_num': train_env_num, 'gamma': gamma, 'recurrent': recurrent,
     'log_dir': log_dir, 'n_plot_agents': 0
 }
-training_args = {'n_epoch': 20, 'n_steps_per_epoch': 500, 'rollout_len': rollout_len}
+training_args = {'n_epoch': 5, 'n_steps_per_epoch': 500, 'rollout_len': rollout_len}
 
 run_test_process = True
 render_test_env = True
@@ -61,11 +61,11 @@ def make_env():
     return make
 
 
-def make_ac_model():
+def make_ac_model(ac_device):
     def make_ac():
         return ActorCriticTwoMLP(**ac_args)
     model = AgentModel(
-        device, make_ac, distribution_str,
+        ac_device, make_ac, distribution_str,
         obs_normalizer_size=observation_size,
         reward_scaler_size=1,
         value_normalizer_size=1
@@ -85,9 +85,10 @@ def make_optimizer(model):
 def main():
     create_log_dir(log_dir, __file__)
     parallel.run(
-        log_dir, make_env, make_ac_model, render_test_env,
+        log_dir, make_env, make_ac_model, device,
         make_optimizer, train_args, training_args,
         run_test_process=run_test_process,
+        render_test_env=render_test_env,
         test_process_act_deterministic=test_process_act_deterministic
     )
 
