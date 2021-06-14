@@ -9,7 +9,7 @@ class ModelOptimizer:
     def __init__(
             self,
             model,
-            learning_rate, clip_grad,
+            learning_rate, clip_grad
     ):
         self.model = model
         self.optimizer = torch.optim.Adam(model.parameters(), learning_rate)

@@ -7,7 +7,7 @@ from cherry_rl.utils.utils import create_log_dir
 
 from cherry_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
 from cherry_rl.algorithms.nn.agent_model import AgentModel
-from cherry_rl.algorithms.optimizers.ppo import PPO
+from cherry_rl.algorithms.optimizers.rl.ppo import PPO
 
 import cherry_rl.algorithms.parallel as parallel
 

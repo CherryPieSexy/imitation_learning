@@ -123,11 +123,11 @@ initialize it in ```make_ac_model``` function, and pass as ```make_actor_critic`
 #### Trained environments
 GIFs of some of results:
 
-BipedalWalker-v3: mean reward ~333, 0 fails over 1000 episodes, [config](old_code/train_scripts/ppo/bipedal.py).
+BipedalWalker-v3: mean reward ~333, 0 fails over 1000 episodes, [config](configs/bipedal/bipedal_ppo.py).
 
 ![bipedal](./gifs/bipedal.gif)
 
-Humanoid-v3: mean reward ~11.3k, 14 fails over 1000 episodes, [config](old_code/train_scripts/ppo/humanoid.py).
+Humanoid-v3: mean reward ~11.3k, 14 fails over 1000 episodes, [config](configs/humanoid/humanoid_ppo.py).
 
 ![humanoid](./gifs/humanoid.gif)
 
@@ -136,12 +136,11 @@ which have integration bug that makes environment easier. For academic purposes 
 
 CarRacing-v0: mean reward = 894 ± 32, 26 fails over 100 episodes 
 (episode is considered failed if reward < 900), 
-[config](old_code/train_scripts/ppo/car_racing.py).
+[config](configs/car_racing/car_racing_ppo.py).
 
 ![car_racing](gifs/car_racing.gif)
 
 ## Further plans
-- Support Normalizing Flow policies
 - Try Motion Imitation [*DeepMimic paper*](https://arxiv.org/abs/1804.02717) algo
 - Add self-play trainer with PPO as backbone algo
 - ...

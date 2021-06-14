@@ -1,5 +1,5 @@
 import torch
-from cherry_rl.algorithms.optimizers.actor_critic_optimizer import ActorCriticOptimizer
+from cherry_rl.algorithms.optimizers.rl.actor_critic_optimizer import ActorCriticOptimizer
 
 
 class A2C(ActorCriticOptimizer):

@@ -8,9 +8,9 @@ from cherry_rl.utils.utils import create_log_dir
 from cherry_rl.algorithms.demo_buffer import TransitionsDemoBuffer
 from cherry_rl.algorithms.nn.actor_critic import MLP, ActorCriticTwoMLP
 from cherry_rl.algorithms.nn.agent_model import AgentModel
-from cherry_rl.algorithms.optimizers.ppo import PPO
-from cherry_rl.algorithms.optimizers.discriminator_optimizer import DiscriminatorOptimizer
-from cherry_rl.algorithms.optimizers.gail import GAIL
+from cherry_rl.algorithms.optimizers.rl.ppo import PPO
+from cherry_rl.algorithms.optimizers.gail.discriminator_optimizer import DiscriminatorOptimizer
+from cherry_rl.algorithms.optimizers.gail.gail import GAIL
 
 import cherry_rl.algorithms.parallel as parallel
 

@@ -7,7 +7,7 @@ from cherry_rl.utils.utils import create_log_dir
 
 from cherry_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
 from cherry_rl.algorithms.nn.agent_model import AgentModel
-from cherry_rl.algorithms.optimizers.ppo import PPO
+from cherry_rl.algorithms.optimizers.rl.ppo import PPO
 
 import cherry_rl.algorithms.parallel as parallel
 
@@ -22,21 +22,21 @@ action_size = 4
 distribution_str = 'Beta'
 
 gamma = 0.99
-train_env_num = 8
-rollout_len = 64
+train_env_num = 32
+rollout_len = 16
 
 ac_args = {'input_size': observation_size, 'hidden_size': hidden_size, 'action_size': action_size * 2}
 ppo_args = {
-    'normalize_adv': True,
+    # 'normalize_adv': True,
     'returns_estimator': 'v-trace',
-    'ppo_n_epoch': 5, 'ppo_n_mini_batches': 4,
+    'ppo_n_epoch': 8, 'ppo_n_mini_batches': 4,
     'ppo_epsilon': 0.1
 }
 train_args = {
     'train_env_num': train_env_num, 'gamma': gamma, 'recurrent': recurrent,
     'log_dir': log_dir, 'n_plot_agents': 0
 }
-training_args = {'n_epoch': 5, 'n_steps_per_epoch': 500, 'rollout_len': rollout_len}
+training_args = {'n_epoch': 15, 'n_steps_per_epoch': 500, 'rollout_len': rollout_len}
 
 run_test_process = True
 render_test_env = True

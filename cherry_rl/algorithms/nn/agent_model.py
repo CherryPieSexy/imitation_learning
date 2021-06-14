@@ -110,12 +110,17 @@ class AgentModel(torch.nn.Module):
             x_t = torch.tensor(x, dtype=torch.float32, device=self.device)
         return x_t
 
-    def act(self, observation, memory, deterministic):
+    def act(self, observation, memory, deterministic, with_grad=False):
         observation_t = self.t(observation)
-        with torch.no_grad():
+        if with_grad:
             policy, value, memory = self.forward(observation_t, memory)
             # RealNVP requires sampling with 'no_grad'.
             action, log_prob = self.pi_distribution.sample(policy, deterministic)
+        else:
+            with torch.no_grad():
+                policy, value, memory = self.forward(observation_t, memory)
+                # RealNVP requires sampling with 'no_grad'.
+                action, log_prob = self.pi_distribution.sample(policy, deterministic)
 
         result = {
             # 'policy': policy, 'value': value,

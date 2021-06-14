@@ -94,6 +94,9 @@ class Bernoulli(Categorical):
         return entropy.sum(-1)
 
 
+# TODO: Gumbel Bernoulli
+
+
 def convert_parameters_beta(parameters):
     parameters = 1.0 + fun.softplus(parameters)
     action_size = parameters.size(-1) // 2

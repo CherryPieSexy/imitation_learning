@@ -4,7 +4,7 @@ import torch
 
 from cherry_rl.utils.utils import time_it
 from cherry_rl.algorithms.rollout_shuffler import get_data_generator
-from cherry_rl.algorithms.optimizers.actor_critic_optimizer import ActorCriticOptimizer
+from cherry_rl.algorithms.optimizers.rl.actor_critic_optimizer import ActorCriticOptimizer
 
 
 class PPO(ActorCriticOptimizer):

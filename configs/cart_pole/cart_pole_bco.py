@@ -9,9 +9,9 @@ from cherry_rl.algorithms.demo_buffer import TransitionsDemoBuffer
 from cherry_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
 from cherry_rl.algorithms.nn.agent_model import AgentModel
 from cherry_rl.algorithms.nn.inverse_dynamics_model import InverseDynamicsModel
-from cherry_rl.algorithms.optimizers.d_kl_policy_optimizer import PolicyOptimizer
-from cherry_rl.algorithms.optimizers.inverse_dynamics_optimizer import InverseDynamicsOptimizer
-from cherry_rl.algorithms.optimizers.bco import BCO
+from cherry_rl.algorithms.optimizers.bco.d_kl_policy_optimizer import PolicyOptimizer
+from cherry_rl.algorithms.optimizers.bco.inverse_dynamics_optimizer import InverseDynamicsOptimizer
+from cherry_rl.algorithms.optimizers.bco.bco import BCO
 
 import cherry_rl.algorithms.parallel as parallel
 
