@@ -34,7 +34,7 @@ def run(
 
     queue_to_tester = mp.Queue()
     queue_to_writer = mp.Queue()
-    queue_to_optimizer = mp.Queue()
+    queue_to_optimizer = mp.Queue(1)
 
     # start processes
     model_process = start_process(
