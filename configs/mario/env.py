@@ -4,7 +4,7 @@ from gym import Wrapper
 from gym.spaces import Box
 from nes_py.wrappers import JoypadSpace
 import gym_super_mario_bros
-from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+from gym_super_mario_bros.actions import SIMPLE_MOVEMENT, COMPLEX_MOVEMENT
 
 
 def process_frame(frame):
@@ -34,10 +34,16 @@ class CustomReward(Wrapper):
             if info["flag_get"]:
                 reward += 50
             else:
-                reward -= 50
-        if self.world == 1 and self.stage == 2:
+                penalty = 500 if self.world == 2 and self.stage == 2 else 50
+                reward -= penalty
+        if self.world in [1, 4] and self.stage == 2:
             # prevents Mario from running into "warp zone"
             if info["y_pos"] >= 255:
+                reward -= 50
+                done = True
+        if self.world == 1 and self.stage == 3:
+            if (640 <= info["x_pos"] <= 660 and info["y_pos"] < 190) or (
+                    1661 <= info["x_pos"] <= 1680 and info["y_pos"] < 131):
                 reward -= 50
                 done = True
         if self.world == 7 and self.stage == 4:
@@ -97,10 +103,10 @@ class CustomSkipFrame(Wrapper):
         return self.states.astype(np.float32)
 
 
-def make_mario_env(world, stage):
+def make_mario_env(world, stage, complex_movement=False):
     env = gym_super_mario_bros.make("SuperMarioBros-{}-{}-v0".format(world, stage))
 
-    env = JoypadSpace(env, SIMPLE_MOVEMENT)
+    env = JoypadSpace(env, COMPLEX_MOVEMENT if complex_movement else SIMPLE_MOVEMENT)
     env = CustomReward(env, world, stage)
     env = CustomSkipFrame(env)
     return env
