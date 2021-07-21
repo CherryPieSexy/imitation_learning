@@ -13,21 +13,22 @@ from configs.mario.encoder import Encoder
 from configs.mario.env import make_mario_env
 
 
-world, level = 1, 3
-log_dir = f'logs/mario/world-{world}-level-{level}/'
-device = torch.device('cuda')
+world, level = 7, 3
+log_dir = f'logs/mario/world-{world}-level-{level}_tune_1/'
+device = torch.device('cpu')
 recurrent = False
 
 emb_size = 512
 action_size = 7
 distribution_str = 'Categorical'
 
-gamma = 0.99
+gamma = 0.9
 train_env_num = 32
-rollout_len = 32
+rollout_len = 64
 
 ac_args = {'input_size': emb_size, 'action_size': action_size}
 ppo_args = {
+    'entropy': 1e-2,
     'normalize_adv': True,
     'learning_rate': 3e-4, 'returns_estimator': 'v-trace',
     'ppo_n_epoch': 4, 'ppo_n_mini_batches': 4,
@@ -37,10 +38,10 @@ train_args = {
     'train_env_num': train_env_num, 'gamma': gamma, 'recurrent': recurrent,
     'log_dir': log_dir, 'n_plot_agents': 0
 }
-training_args = {'n_epoch': 10, 'n_steps_per_epoch': 1000, 'rollout_len': rollout_len}
+training_args = {'n_epoch': 10, 'n_steps_per_epoch': 250, 'rollout_len': rollout_len}
 
 run_test_process = True
-render_test_env = False
+render_test_env = True
 test_process_act_deterministic = False
 
 

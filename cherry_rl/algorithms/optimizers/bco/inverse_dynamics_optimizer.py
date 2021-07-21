@@ -43,5 +43,5 @@ class InverseDynamicsOptimizer(ModelOptimizer):
     def train(self, data_dict):
         loss, result = self._inverse_dynamics_loss(data_dict)
         inverse_dynamics_model_grad_norm = self.optimize_loss(loss)
-        result.update({'dynamics_model_grad_norm': inverse_dynamics_model_grad_norm})
+        result.update({'inverse_dynamics_model_grad_norm': inverse_dynamics_model_grad_norm})
         return result
