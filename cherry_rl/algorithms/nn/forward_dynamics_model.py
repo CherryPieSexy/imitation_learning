@@ -10,10 +10,19 @@ class ForwardDynamicsModel(nn.Module):
     Predicts obs[t+1] ~ P(.|obs[t], a).
     Supports only 'deterministic' and 'Normal' distributions.
     """
-    def forward(self, observation, action):
+    def forward(
+            self,
+            observation: torch.Tensor,
+            action: torch.Tensor
+    ):
         raise NotImplementedError
 
-    def sample(self, observation, action, deterministic=False):
+    def sample(
+            self,
+            observation: torch.Tensor,
+            action: torch.Tensor,
+            deterministic: bool = False
+    ) -> torch.Tensor:
         model_output = self.forward(observation, action)
         if self.state_distribution_str == 'deterministic':
             return model_output
@@ -25,9 +34,11 @@ class ForwardDynamicsModel(nn.Module):
 class ForwardDynamicsContinuousActionsModel(ForwardDynamicsModel):
     def __init__(
             self,
-            observation_size, hidden_size, action_size,
-            state_distribution_str,
-            n_layers=3, activation_str='tanh', output_gain=1.0
+            observation_size: int,
+            hidden_size: int,
+            action_size: int,
+            state_distribution_str: str,
+            n_layers: int = 3, activation_str: str = 'tanh', output_gain: float = 1.0
     ):
         assert \
             state_distribution_str in ['deterministic', 'RNormal'],\
@@ -42,7 +53,11 @@ class ForwardDynamicsContinuousActionsModel(ForwardDynamicsModel):
         if state_distribution_str != 'deterministic':
             self.state_distribution = distributions_dict[state_distribution_str]()
 
-    def forward(self, observation, action):
+    def forward(
+            self,
+            observation: torch.Tensor,
+            action: torch.Tensor
+    ) -> torch.Tensor:
         observation_action = torch.cat([observation, action], dim=-1)
         return self.mlp(observation_action)
 
@@ -50,11 +65,12 @@ class ForwardDynamicsContinuousActionsModel(ForwardDynamicsModel):
 class ForwardDynamicsDiscreteActionsModel(ForwardDynamicsModel):
     def __init__(
             self,
-            observation_size, hidden_size,
-            action_size,
-            action_distribution_str,  # one from [Categorical, Gumbel, Bernoulli]
-            state_distribution_str,
-            n_layers=3, activation_str='tanh', output_gain=1.0
+            observation_size: int,
+            hidden_size: int,
+            action_size: int,
+            action_distribution_str: str,  # one from [Categorical, Gumbel, Bernoulli]
+            state_distribution_str: str,
+            n_layers: int = 3, activation_str: str = 'tanh', output_gain: float = 1.0
     ):
         assert \
             state_distribution_str in ['deterministic', 'RNormal'], \
@@ -75,7 +91,11 @@ class ForwardDynamicsDiscreteActionsModel(ForwardDynamicsModel):
         if state_distribution_str != 'deterministic':
             self.state_distribution = distributions_dict[state_distribution_str]()
 
-    def forward(self, observation, action):
+    def forward(
+            self,
+            observation: torch.Tensor,
+            action: torch.Tensor
+    ) -> torch.Tensor:
         observation_embedding = self.observation_embedding(observation)
         action_embedding = self.action_embedding(action.to(torch.long))
         observation_action_embedding = torch.cat([observation_embedding, action_embedding], dim=-1)

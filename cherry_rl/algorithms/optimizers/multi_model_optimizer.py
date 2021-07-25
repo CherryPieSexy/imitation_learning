@@ -1,3 +1,5 @@
+from typing import Dict, Optional
+
 import torch
 
 
@@ -24,7 +26,12 @@ class MultiModelOptimizer:
         )
         self._clip_obs_encoder_grad = clip_grad
 
-    def _obs_embedding(self, data_dict, with_grad=True, obs_key='observations'):
+    def _obs_embedding(
+            self,
+            data_dict: Dict[str, Optional[torch.Tensor]],
+            with_grad: bool = True,
+            obs_key: str = 'observations'
+    ) -> torch.Tensor:
         obs = data_dict[obs_key]
         if with_grad:
             emb, _ = self._actor_critic_optimizer.model.preprocess_observation(obs, None)
@@ -33,7 +40,7 @@ class MultiModelOptimizer:
                 emb, _ = self._actor_critic_optimizer.model.preprocess_observation(obs, None)
         return emb
 
-    def _train_encoder(self):
+    def _train_encoder(self) -> float:
         # encoder should already have gradients
         encoder_grad_norm = torch.nn.utils.clip_grad_norm_(
             self._obs_encoder.parameters(), self._clip_obs_encoder_grad

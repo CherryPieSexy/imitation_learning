@@ -1,3 +1,7 @@
+from typing import Optional, Dict
+
+import torch
+
 from cherry_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
 
 
@@ -13,29 +17,43 @@ class ForwardDynamicsModelOptimizer(ModelOptimizer):
         else:
             self._loss_fn = self._log_p_loss
 
-    def _mse_loss(self, next_observations, model_output, mask):
+    @staticmethod
+    def _mse_loss(
+            next_observations: torch.Tensor,
+            model_output: torch.Tensor,
+    ) -> torch.Tensor:
         mse_loss = 0.5 * (next_observations - model_output) ** 2
-        mse_loss = mse_loss.mean(-1)
-        mse_loss = self._average_loss(mse_loss, mask)
-        return mse_loss
+        loss = mse_loss.mean(-1)
+        return loss
 
-    def _log_p_loss(self, next_observations, model_output, mask):
+    def _log_p_loss(
+            self,
+            next_observations: torch.Tensor,
+            model_output: torch.Tensor
+    ) -> torch.Tensor:
         log_p = self.model.state_distribution.log_prob(model_output, next_observations)
-        log_p_loss = -self._average_loss(log_p, mask)
-        return log_p_loss
+        loss = -log_p
+        return loss
 
-    def _dynamics_loss(self, data_dict):
+    def loss(
+            self,
+            data_dict: Dict[str, Optional[torch.Tensor]]
+    ) -> torch.Tensor:
         observations = data_dict['obs_emb']
         actions = data_dict['actions']
-        mask = data_dict['mask']
         observations, next_observations = observations[:-1], observations[1:]
         model_output = self.model(observations, actions)
-        loss = self._loss_fn(next_observations, model_output, mask)
-        loss_dict = {'forward_dynamics_loss': loss.item()}
-        return loss, loss_dict
+        loss = self._loss_fn(next_observations, model_output)
+        return loss
 
-    def train(self, data_dict):
-        loss, result = self._dynamics_loss(data_dict)
+    def train(
+            self,
+            data_dict: Dict[str, Optional[torch.Tensor]]
+    ) -> Dict[str, float]:
+        loss = self.loss(data_dict)
+        loss = self._average_loss(loss, data_dict['mask'])
+        result = {'forward_dynamics_loss': loss.item()}
+
         dynamics_model_grad_norm = self.optimize_loss(loss)
         result.update({'forward_dynamics_model_grad_norm': dynamics_model_grad_norm})
         return result
