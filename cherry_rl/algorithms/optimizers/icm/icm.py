@@ -85,14 +85,14 @@ class ICMOptimizer:
             self._forward_dynamics_optimizer.model.parameters(), self._clip_grad
         )
         encoder_grad_norm = torch.nn.utils.clip_grad_norm_(self._dynamics_encoder.parameters(), self._clip_grad)
-        self._inverse_dynamics_optimizer.step()
-        self._forward_dynamics_optimizer.step()
+        self._inverse_dynamics_optimizer.optimizer.step()
+        self._forward_dynamics_optimizer.optimizer.step()
         self._dynamics_encoder_optimizer.step()
 
         result = {
             'inverse_dynamics_loss': idm_loss.item(),
             'forward_dynamics_loss': fdm_loss.item(),
-            'icm_rewards': icm_rewards.mean().item(),
+            'intrinsic_reward': self._intrinsic_reward_weight * icm_rewards.mean().item(),
 
             'inverse_dynamics_model_grad_norm': idm_grad_norm,
             'forward_dynamics_model_grad_norm': fdm_grad_norm,
@@ -110,7 +110,7 @@ class ICMOptimizer:
         rollout_data_dict['is_done'] = torch.cat([done, torch.zeros_like(done)], dim=-1)
 
         extrinsic_rewards = rollout_data_dict['rewards']
-        intrinsic_rewards = icm_rewards.mean(-1).unsqueeze(-1)
+        intrinsic_rewards = icm_rewards.unsqueeze(-1)
 
         new_rewards = torch.cat([
             self._extrinsic_reward_weight * extrinsic_rewards,

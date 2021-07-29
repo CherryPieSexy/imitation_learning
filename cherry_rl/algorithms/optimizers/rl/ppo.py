@@ -1,4 +1,5 @@
 from collections import defaultdict
+from typing import Dict, Tuple, Optional
 
 import torch
 
@@ -21,11 +22,11 @@ class PPO(ActorCriticOptimizer):
     def __init__(
             self,
             *args,
-            ppo_n_epoch,
-            ppo_n_mini_batches,
-            ppo_epsilon=0.2,
-            use_ppo_value_loss=False,
-            rollback_alpha=0.05,
+            ppo_n_epoch: int,
+            ppo_n_mini_batches: int,
+            ppo_epsilon: float = 0.2,
+            use_ppo_value_loss: bool = False,
+            rollback_alpha: float = 0.05,
             **kwargs
     ):
         """
@@ -48,7 +49,12 @@ class PPO(ActorCriticOptimizer):
         self.ppo_n_epoch = ppo_n_epoch
         self.ppo_n_mini_batches = ppo_n_mini_batches
 
-    def _policy_loss(self, data_piece, policy, advantage):
+    def _policy_loss(
+            self,
+            data_piece: Dict[str, torch.Tensor],
+            policy: torch.Tensor,
+            advantage: torch.Tensor
+    ) -> torch.Tensor:
         if self.normalize_adv:
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
@@ -67,7 +73,11 @@ class PPO(ActorCriticOptimizer):
 
         return policy_loss
 
-    def _clipped_loss(self, prob_ratio, advantage):
+    def _clipped_loss(
+            self,
+            prob_ratio: torch.Tensor,
+            advantage: torch.Tensor
+    ) -> torch.Tensor:
         prob_ratio_clamp = torch.clamp(
             prob_ratio, 1.0 - self.ppo_epsilon, 1.0 + self.ppo_epsilon
         )
@@ -77,7 +87,11 @@ class PPO(ActorCriticOptimizer):
         policy_loss = torch.min(surrogate_1, surrogate_2)
         return policy_loss
 
-    def _rollback_loss(self, prob_ratio, advantage):
+    def _rollback_loss(
+            self,
+            prob_ratio: torch.Tensor,
+            advantage: torch.Tensor
+    ) -> torch.Tensor:
         eps = self.ppo_epsilon
         alpha = self.rollback_alpha
 
@@ -98,7 +112,12 @@ class PPO(ActorCriticOptimizer):
         )
         return policy_loss
 
-    def _clipped_value_loss(self, value_old, value, value_target):
+    def _clipped_value_loss(
+            self,
+            value_old: torch.Tensor,
+            value: torch.Tensor,
+            value_target: torch.Tensor
+    ) -> torch.Tensor:
         # clipped value loss, PPO-style
         clipped_value = value_old + torch.clamp(
             (value - value_old), -self.ppo_epsilon, self.ppo_epsilon
@@ -111,7 +130,7 @@ class PPO(ActorCriticOptimizer):
         return 0.5 * clipped_mse.mean(-1)
 
     @staticmethod
-    def _mse_value_loss(value, value_target):
+    def _mse_value_loss(value: torch.Tensor, value_target: torch.Tensor) -> torch.Tensor:
         difference_2 = (value - value_target) ** 2
         return 0.5 * (difference_2.mean(-1))
 
@@ -123,7 +142,12 @@ class PPO(ActorCriticOptimizer):
             value_loss = self._mse_value_loss(value, value_target)
         return value_loss
 
-    def calculate_loss(self, data_piece, policy, value):
+    def calculate_loss(
+            self,
+            data_piece: Dict[str, torch.Tensor],
+            policy: torch.Tensor,
+            value: torch.Tensor
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
         value_target = data_piece['value_target']
         advantage = data_piece['advantage']
         mask = data_piece['mask']
@@ -146,7 +170,7 @@ class PPO(ActorCriticOptimizer):
         return loss, loss_dict
 
     @time_it
-    def _ppo_train_step(self, data_piece):
+    def _ppo_train_step(self, data_piece: Dict[str, torch.Tensor]) -> Dict[str, float]:
         # 1) call nn on accepted data:
         observations = data_piece['observations']
         memory = data_piece['memory']
@@ -162,8 +186,9 @@ class PPO(ActorCriticOptimizer):
 
         return result
 
+    # TODO: what typing should I use for data generator here?
     @time_it
-    def _ppo_epoch(self, data_generator):
+    def _ppo_epoch(self, data_generator) -> Tuple[Dict[str, float], float]:
         epoch_result = defaultdict(float)
         mean_train_op_time = 0
 
@@ -175,7 +200,10 @@ class PPO(ActorCriticOptimizer):
 
         return epoch_result, mean_train_op_time / self.ppo_n_mini_batches
 
-    def _main(self, data_dict):
+    def _main(
+            self,
+            data_dict: Dict[str, Optional[torch.Tensor]]
+    ) -> Tuple[Dict[str, float], Dict[str, float]]:
         data_dict = {
             k: (v.to(torch.float32) if type(v) is torch.Tensor else v)
             for k, v in data_dict.items()

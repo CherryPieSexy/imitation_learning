@@ -8,7 +8,7 @@ from cherry_rl.algorithms.distributions import distributions_dict
 class ForwardDynamicsModel(nn.Module):
     """
     Predicts obs[t+1] ~ P(.|obs[t], a).
-    Supports only 'deterministic' and 'Normal' distributions.
+    Supports only 'deterministic' and 'RNormal' distributions.
     """
     def forward(
             self,
@@ -78,6 +78,7 @@ class ForwardDynamicsDiscreteActionsModel(ForwardDynamicsModel):
         super().__init__()
 
         self.observation_embedding = nn.Linear(observation_size, hidden_size)
+        self.action_distribution_str = action_distribution_str
         if action_distribution_str == 'Bernoulli':
             self.action_embedding = init(nn.Linear(action_size, hidden_size))
         else:
@@ -97,6 +98,8 @@ class ForwardDynamicsDiscreteActionsModel(ForwardDynamicsModel):
             action: torch.Tensor
     ) -> torch.Tensor:
         observation_embedding = self.observation_embedding(observation)
-        action_embedding = self.action_embedding(action.to(torch.long))
+        if self.action_distribution_str == 'Categorical':
+            action = action.to(torch.long)
+        action_embedding = self.action_embedding(action)
         observation_action_embedding = torch.cat([observation_embedding, action_embedding], dim=-1)
         return self.mlp(observation_action_embedding)

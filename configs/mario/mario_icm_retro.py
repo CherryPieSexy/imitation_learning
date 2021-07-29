@@ -1,7 +1,11 @@
 import torch
 import torch.multiprocessing as mp
 
+import retro
+
 from cherry_rl.utils.utils import create_log_dir
+import cherry_rl.utils.env_wrappers as wrappers
+from cherry_rl.utils.image_wrapper import ImageEnvWrapper
 
 from cherry_rl.algorithms.nn.recurrent_encoders import OneLayerActorCritic
 from cherry_rl.algorithms.nn.forward_dynamics_model import ForwardDynamicsDiscreteActionsModel
@@ -16,7 +20,7 @@ from cherry_rl.algorithms.optimizers.icm.icm import ICMOptimizer
 import cherry_rl.algorithms.parallel as parallel
 
 from configs.mario.encoder import Encoder
-from configs.mario.env import make_mario_env
+from configs.mario.env_retro import MarioWrapper
 
 
 world, level = 1, 1
@@ -26,15 +30,18 @@ recurrent = False
 
 ac_emb_size = 512
 dynamics_emb_size = 512
-action_size = 12
-action_distribution_str = 'Categorical'
+action_size = 9
+reward_size = 2
+action_distribution_str = 'Bernoulli'
 state_distribution_str = 'deterministic'
 
 gamma = 0.99
-train_env_num = 32
-rollout_len = 64
+train_env_num = 128
+rollout_len = 16
 
-ac_args = {'input_size': ac_emb_size, 'action_size': action_size}
+ac_args = {
+    'input_size': ac_emb_size, 'action_size': action_size, 'critic_size': reward_size
+}
 ppo_args = {
     'entropy': 1e-2,
     'normalize_adv': True,
@@ -55,13 +62,16 @@ idm_args = {
 }
 idm_optimizer_args = {'learning_rate': 3e-4, 'clip_grad': 0.5}
 
-icm_args = {}  # use default args
+icm_args = {
+    'extrinsic_reward_weight': 0.0,
+    'warm_up_steps': 1,
+}
 
 train_args = {
     'train_env_num': train_env_num, 'gamma': gamma, 'recurrent': recurrent,
     'log_dir': log_dir, 'n_plot_agents': 0
 }
-training_args = {'n_epoch': 10, 'n_steps_per_epoch': 100, 'rollout_len': rollout_len}
+training_args = {'n_epoch': 10, 'n_steps_per_epoch': 1000, 'rollout_len': rollout_len}
 
 run_test_process = False
 render_test_env = True
@@ -70,7 +80,13 @@ test_process_act_deterministic = False
 
 def make_env():
     def make():
-        return make_mario_env(world, level, complex_movement=True)
+        env = retro.make('SuperMarioBros-Nes')
+        env = MarioWrapper(env)
+        env = wrappers.ActionRepeatAndRenderWrapper(env, 4)
+        env = ImageEnvWrapper(env, x_size=84, y_size=84)
+        env = wrappers.FrameStackWrapper(env, 4)
+        return env
+
     return make
 
 
@@ -80,23 +96,32 @@ def make_ac_model(ac_device):
     model = AgentModel(
         ac_device, make_ac, action_distribution_str,
         make_obs_encoder=Encoder,
-        value_normalizer_size=1
+        value_normalizer_size=reward_size
     )
     return model
 
 
 def make_optimizer(model):
-    ppo = PPO(model, **ppo_args)
+    def make_ac_optimizer():
+        return PPO(model, **ppo_args)
 
-    fdm = ForwardDynamicsDiscreteActionsModel(**fdm_args)
-    fdm_optimizer = ForwardDynamicsModelOptimizer(fdm, **fdm_optimizer_args)
+    def make_fdm_optimizer():
+        fdm = ForwardDynamicsDiscreteActionsModel(**fdm_args).to(device)
+        return ForwardDynamicsModelOptimizer(fdm, **fdm_optimizer_args)
 
-    idm = InverseDynamicsModel(**idm_args)
-    idm_optimizer = InverseDynamicsOptimizer(idm, **idm_optimizer_args)
+    def make_idm_optimizer():
+        idm = InverseDynamicsModel(**idm_args).to(device)
+        return InverseDynamicsOptimizer(idm, **idm_optimizer_args)
+
+    def make_encoder():
+        encoder = Encoder().to(device)
+        return encoder
 
     icm = ICMOptimizer(
-        ppo, fdm_optimizer, idm_optimizer,
-        dynamics_encoder_factory=Encoder,
+        make_ac_optimizer=make_ac_optimizer,
+        make_forward_dynamics_optimizer=make_fdm_optimizer,
+        make_inverse_dynamics_optimizer=make_idm_optimizer,
+        dynamics_encoder_factory=make_encoder,
         **icm_args
     )
     return icm
