@@ -1,3 +1,5 @@
+from functools import partial
+
 import torch
 import torch.multiprocessing as mp
 
@@ -23,8 +25,7 @@ from configs.mario.encoder import Encoder
 from configs.mario.env_retro import MarioWrapper
 
 
-world, level = 1, 1
-log_dir = f'logs/mario/world-{world}-level-{level}_icm/'
+log_dir = f'logs/mario/icm_0/'
 device = torch.device('cpu')
 recurrent = False
 
@@ -34,16 +35,17 @@ action_size = 9
 reward_size = 2
 action_distribution_str = 'Bernoulli'
 state_distribution_str = 'deterministic'
+layer_norm = False
 
 gamma = 0.99
 train_env_num = 128
-rollout_len = 16
+rollout_len = 32
 
 ac_args = {
     'input_size': ac_emb_size, 'action_size': action_size, 'critic_size': reward_size
 }
 ppo_args = {
-    'entropy': 1e-2,
+    'entropy': 1e-4,
     'normalize_adv': True,
     'learning_rate': 3e-4, 'returns_estimator': 'v-trace',
     'ppo_n_epoch': 10, 'ppo_n_mini_batches': 8,
@@ -121,7 +123,7 @@ def make_optimizer(model):
         make_ac_optimizer=make_ac_optimizer,
         make_forward_dynamics_optimizer=make_fdm_optimizer,
         make_inverse_dynamics_optimizer=make_idm_optimizer,
-        dynamics_encoder_factory=make_encoder,
+        dynamics_encoder_factory=partial(make_encoder, layer_norm=layer_norm),
         **icm_args
     )
     return icm

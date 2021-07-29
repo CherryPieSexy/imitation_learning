@@ -74,7 +74,7 @@ class ICMOptimizer:
         fdm_loss = self._forward_dynamics_optimizer.loss(rollout_data_dict)
         icm_rewards = fdm_loss.detach()
         idm_loss = self._average_loss(idm_loss, rollout_data_dict['mask'])
-        fdm_loss = self._average_loss(idm_loss, rollout_data_dict['mask'])
+        fdm_loss = self._average_loss(fdm_loss, rollout_data_dict['mask'])
 
         dynamics_loss = (1.0 - self._beta) * idm_loss + self._beta * fdm_loss
         dynamics_loss.backward()
