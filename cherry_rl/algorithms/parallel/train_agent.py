@@ -105,7 +105,8 @@ class TrainAgent:
     def _reset_discounted_returns(self, done):
         for i, d in enumerate(done):
             # in recurrent case it will be probably masked anyway.
-            self._env_discounted_return[i] = 0.0
+            if d:
+                self._env_discounted_return[i] = 0.0
 
     def _reset_env_and_memory_by_ids(self, observation, reset_ids):
         ids = [i for i, d in enumerate(reset_ids) if d]

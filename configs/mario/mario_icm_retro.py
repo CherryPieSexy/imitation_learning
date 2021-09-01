@@ -1,5 +1,3 @@
-from functools import partial
-
 import torch
 import torch.multiprocessing as mp
 
@@ -26,7 +24,7 @@ from configs.mario.env_retro import MarioWrapper
 
 
 log_dir = f'logs/mario/icm_0/'
-device = torch.device('cpu')
+device = torch.device('cuda')
 recurrent = False
 
 ac_emb_size = 512
@@ -38,8 +36,8 @@ state_distribution_str = 'deterministic'
 layer_norm = False
 
 gamma = 0.99
-train_env_num = 128
-rollout_len = 32
+train_env_num = 64
+rollout_len = 64
 
 ac_args = {
     'input_size': ac_emb_size, 'action_size': action_size, 'critic_size': reward_size
@@ -73,7 +71,7 @@ train_args = {
     'train_env_num': train_env_num, 'gamma': gamma, 'recurrent': recurrent,
     'log_dir': log_dir, 'n_plot_agents': 0
 }
-training_args = {'n_epoch': 10, 'n_steps_per_epoch': 1000, 'rollout_len': rollout_len}
+training_args = {'n_epoch': 10, 'n_steps_per_epoch': 2000, 'rollout_len': rollout_len}
 
 run_test_process = False
 render_test_env = True
@@ -98,6 +96,7 @@ def make_ac_model(ac_device):
     model = AgentModel(
         ac_device, make_ac, action_distribution_str,
         make_obs_encoder=Encoder,
+        reward_scaler_size=reward_size,
         value_normalizer_size=reward_size
     )
     return model
@@ -116,14 +115,14 @@ def make_optimizer(model):
         return InverseDynamicsOptimizer(idm, **idm_optimizer_args)
 
     def make_encoder():
-        encoder = Encoder().to(device)
+        encoder = Encoder(layer_norm=layer_norm).to(device)
         return encoder
 
     icm = ICMOptimizer(
         make_ac_optimizer=make_ac_optimizer,
         make_forward_dynamics_optimizer=make_fdm_optimizer,
         make_inverse_dynamics_optimizer=make_idm_optimizer,
-        dynamics_encoder_factory=partial(make_encoder, layer_norm=layer_norm),
+        dynamics_encoder_factory=make_encoder,
         **icm_args
     )
     return icm

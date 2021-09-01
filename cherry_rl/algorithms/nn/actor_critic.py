@@ -35,16 +35,20 @@ class MLP(nn.Module):
         gain = nn.init.calculate_gain(activation_str)
         activation = activations_dict[activation_str]
 
-        hidden_layers = []
-        for _ in range(n_layers - 2):
-            hidden_layers.append(init(nn.Linear(hidden_size, hidden_size), gain=gain))
-            hidden_layers.append(activation())
+        if n_layers == 1:
+            self.mlp = nn.Sequential(init(nn.Linear(input_size, output_size)))
 
-        self.mlp = nn.Sequential(
-            init(nn.Linear(input_size, hidden_size), gain=gain), activation(),
-            *hidden_layers,
-            init(nn.Linear(hidden_size, output_size), gain=output_gain)
-        )
+        else:
+            hidden_layers = []
+            for _ in range(n_layers - 2):
+                hidden_layers.append(init(nn.Linear(hidden_size, hidden_size), gain=gain))
+                hidden_layers.append(activation())
+
+            self.mlp = nn.Sequential(
+                init(nn.Linear(input_size, hidden_size), gain=gain), activation(),
+                *hidden_layers,
+                init(nn.Linear(hidden_size, output_size), gain=output_gain)
+            )
 
     def forward(self, x):
         return self.mlp(x)
