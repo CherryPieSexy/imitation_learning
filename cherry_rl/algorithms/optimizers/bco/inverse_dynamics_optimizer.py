@@ -42,12 +42,21 @@ class InverseDynamicsOptimizer(ModelOptimizer):
 
     def train(
             self,
-            data_dict: Dict[str, Optional[torch.Tensor]]
+            data_dict: Dict[str, Optional[torch.Tensor]],
+            retain_graph: bool = False
     ) -> Dict[str, float]:
+        """
+        In ICM algorithm inverse and forward dynamics share embedding,
+        so it may be necessary to retain graph during training encoder.
+
+        :param data_dict:
+        :param retain_graph:
+        :return:
+        """
         loss = self.loss(data_dict)
         loss = self._average_loss(loss, data_dict['mask'])
         result = {'inverse_dynamics_loss': loss.item()}
 
-        inverse_dynamics_model_grad_norm = self.optimize_loss(loss)
+        inverse_dynamics_model_grad_norm = self.optimize_loss(loss, retain_graph)
         result.update({'inverse_dynamics_model_grad_norm': inverse_dynamics_model_grad_norm})
         return result

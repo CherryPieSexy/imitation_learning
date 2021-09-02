@@ -27,6 +27,7 @@ class ICMOptimizer:
             extrinsic_reward_weight: float = 1.0,
             intrinsic_reward_weight: float = 1.0,
             beta: float = 0.2,
+            allow_grads_from_fdm: bool = False,
             encoder_lr: float = 1e-3,
             clip_grad: float = 0.5,
             warm_up_steps: int = 1000
@@ -46,6 +47,7 @@ class ICMOptimizer:
         self._extrinsic_reward_weight = extrinsic_reward_weight
         self._intrinsic_reward_weight = intrinsic_reward_weight
         self._beta = beta  # TODO: remove
+        self._allow_grads_from_fdm = allow_grads_from_fdm
 
         self._discounted_intrinsic_return = 0
         self._alive_envs = 1
@@ -165,8 +167,11 @@ class ICMOptimizer:
         rollout_data_dict['obs_emb'] = self._dynamics_encoder(rollout_data_dict['observations'])
 
         # optimize IDM, FDM and dynamics encoder on observation embeddings
-        idm_optimization_result = self._inverse_dynamics_optimizer.train(rollout_data_dict)
-        rollout_data_dict['obs_emb'] = rollout_data_dict['obs_emb'].detach()
+        idm_optimization_result = self._inverse_dynamics_optimizer.train(
+            rollout_data_dict, retain_graph=self._allow_grads_from_fdm
+        )
+        if not self._allow_grads_from_fdm:
+            rollout_data_dict['obs_emb'] = rollout_data_dict['obs_emb'].detach()
         fdm_optimization_result, icm_rewards = self._optimize_fdm(rollout_data_dict)
 
         encoder_grad_norm = self._optimize_encoder()
@@ -205,6 +210,17 @@ class ICMOptimizer:
                 'dynamics_feature_extractor_optimizer': self._dynamics_encoder_optimizer.state_dict(),
             })
         return state_dict
+
+    def load_state_dict(self, state_dict):
+        self._actor_critic_optimizer.model.load_state_dict(state_dict['ac_model'])
+        self._actor_critic_optimizer.optimizer.load_state_dict(state_dict['ac_optimizer'])
+        self._forward_dynamics_optimizer.model.load_state_dict(state_dict['forward_dynamics_model'])
+        self._forward_dynamics_optimizer.optimizer.load_state_dict(state_dict['forward_dynamics_model_optimizer'])
+        self._inverse_dynamics_optimizer.model.load_state_dict(state_dict['inverse_dynamics_model'])
+        self._inverse_dynamics_optimizer.optimizer.load_state_dict(state_dict['inverse_dynamics_model_optimizer'])
+        if self._dynamics_encoder_optimizer is not None:
+            self._dynamics_encoder.load_state_dict(state_dict['dynamics_feature_extractor_model'])
+            self._dynamics_encoder_optimizer.load_state_dict(state_dict['dynamics_feature_extractor_optimizer'])
 
     def save(self, filename: str) -> None:
         torch.save(self.state_dict(), filename)

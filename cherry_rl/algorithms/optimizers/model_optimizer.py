@@ -26,9 +26,9 @@ class ModelOptimizer:
             mask = torch.ones_like(loss)
         return (mask * loss).sum() / mask.sum()
 
-    def optimize_loss(self, loss: torch.Tensor) -> float:
+    def optimize_loss(self, loss: torch.Tensor, retain_graph=False) -> float:
         self.optimizer.zero_grad()
-        loss.backward()
+        loss.backward(retain_graph=retain_graph)
         grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad)
         self.optimizer.step()
         return grad_norm

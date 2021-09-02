@@ -19,17 +19,17 @@ class ForwardDynamicsModelOptimizer(ModelOptimizer):
 
     @staticmethod
     def _mse_loss(
-            next_observations: torch.Tensor,
             model_output: torch.Tensor,
+            next_observations: torch.Tensor
     ) -> torch.Tensor:
-        mse_loss = 0.5 * (next_observations - model_output) ** 2
+        mse_loss = 0.5 * (model_output - next_observations) ** 2
         loss = mse_loss.mean(-1)
         return loss
 
     def _log_p_loss(
             self,
-            next_observations: torch.Tensor,
-            model_output: torch.Tensor
+            model_output: torch.Tensor,
+            next_observations: torch.Tensor
     ) -> torch.Tensor:
         log_p = self.model.state_distribution.log_prob(model_output, next_observations)
         loss = -log_p
@@ -41,9 +41,9 @@ class ForwardDynamicsModelOptimizer(ModelOptimizer):
     ) -> torch.Tensor:
         observations = data_dict['obs_emb']
         actions = data_dict['actions']
-        observations, next_observations = observations[:-1], observations[1:]
+        observations, next_observations = observations[:-1], observations[1:].detach()
         model_output = self.model(observations, actions)
-        loss = self._loss_fn(next_observations, model_output)
+        loss = self._loss_fn(model_output, next_observations)
         return loss
 
     def train(
