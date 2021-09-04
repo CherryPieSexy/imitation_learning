@@ -23,7 +23,7 @@ from configs.mario.encoder import Encoder
 from configs.mario.env_retro import MarioWrapper
 
 
-log_dir = f'logs/mario/icm_2/'
+log_dir = f'logs/mario/icm/'
 device = torch.device('cuda')
 recurrent = False
 
@@ -37,15 +37,15 @@ layer_norm = False
 
 gamma = 0.99
 train_env_num = 64
-rollout_len = 64
+rollout_len = 32
 
 ac_args = {
     'input_size': ac_emb_size, 'action_size': action_size, 'critic_size': reward_size
 }
 ppo_args = {
-    'entropy': 1e-4,
+    'entropy': 1e-2,
     'normalize_adv': True,
-    'learning_rate': 3e-4, 'returns_estimator': 'v-trace',
+    'learning_rate': 3e-4, 'returns_estimator': 'gae',
     'ppo_n_epoch': 10, 'ppo_n_mini_batches': 8,
     'rollback_alpha': 0.0
 }
@@ -72,7 +72,7 @@ train_args = {
     'train_env_num': train_env_num, 'gamma': gamma, 'recurrent': recurrent,
     'log_dir': log_dir, 'n_plot_agents': 0
 }
-training_args = {'n_epoch': 10, 'n_steps_per_epoch': 1000, 'rollout_len': rollout_len}
+training_args = {'n_epoch': 20, 'n_steps_per_epoch': 2000, 'rollout_len': rollout_len}
 
 run_test_process = False
 render_test_env = True
@@ -126,8 +126,8 @@ def make_optimizer(model):
         dynamics_encoder_factory=make_encoder,
         **icm_args
     )
-    state_dict = torch.load("logs/mario/icm_1/checkpoints/epoch_6.pth")
-    icm.load_state_dict(state_dict)
+    # state_dict = torch.load("logs/mario/icm_1/checkpoints/epoch_6.pth")
+    # icm.load_state_dict(state_dict)
     return icm
 
 
