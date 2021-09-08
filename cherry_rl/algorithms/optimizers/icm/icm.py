@@ -26,7 +26,6 @@ class ICMOptimizer:
             dynamics_encoder_factory: Callable[[], Any],
             extrinsic_reward_weight: float = 1.0,
             intrinsic_reward_weight: float = 1.0,
-            beta: float = 0.2,
             allow_grads_from_fdm: bool = False,
             encoder_lr: float = 1e-3,
             clip_grad: float = 0.5,
@@ -46,7 +45,6 @@ class ICMOptimizer:
 
         self._extrinsic_reward_weight = extrinsic_reward_weight
         self._intrinsic_reward_weight = intrinsic_reward_weight
-        self._beta = beta  # TODO: remove
         self._allow_grads_from_fdm = allow_grads_from_fdm
 
         self._discounted_intrinsic_return = 0
@@ -59,50 +57,6 @@ class ICMOptimizer:
         if mask is None:
             mask = torch.ones_like(loss)
         return (mask * loss).sum() / mask.sum()
-
-    # def _train_dynamics(
-    #         self,
-    #         rollout_data_dict: Dict[str, Optional[torch.Tensor]]
-    # ) -> Tuple[torch.Tensor, Dict[str, float]]:
-    #     # I have to do training step (i.e. zero grad, compute loss, optimizer step) manually
-    #     # because IDM & FDM share observation embedding
-    #     rollout_data_dict['obs_emb'] = self._dynamics_encoder(rollout_data_dict['observations'])
-    #
-    #     self._inverse_dynamics_optimizer.optimizer.zero_grad()
-    #     self._forward_dynamics_optimizer.optimizer.zero_grad()
-    #     self._dynamics_encoder_optimizer.zero_grad()
-    #
-    #     # losses from dynamics are tensors of shape [Time, Batch]
-    #     idm_loss = self._inverse_dynamics_optimizer.loss(rollout_data_dict)
-    #     fdm_loss = self._forward_dynamics_optimizer.loss(rollout_data_dict)
-    #     icm_rewards = fdm_loss.detach()
-    #     idm_loss = self._average_loss(idm_loss, rollout_data_dict['mask'])
-    #     fdm_loss = self._average_loss(fdm_loss, rollout_data_dict['mask'])
-    #
-    #     dynamics_loss = (1.0 - self._beta) * idm_loss + self._beta * fdm_loss
-    #     dynamics_loss.backward()
-    #     idm_grad_norm = torch.nn.utils.clip_grad_norm_(
-    #         self._inverse_dynamics_optimizer.model.parameters(), self._clip_grad
-    #     )
-    #     fdm_grad_norm = torch.nn.utils.clip_grad_norm_(
-    #         self._forward_dynamics_optimizer.model.parameters(), self._clip_grad
-    #     )
-    #     encoder_grad_norm = torch.nn.utils.clip_grad_norm_(self._dynamics_encoder.parameters(), self._clip_grad)
-    #     self._inverse_dynamics_optimizer.optimizer.step()
-    #     self._forward_dynamics_optimizer.optimizer.step()
-    #     self._dynamics_encoder_optimizer.step()
-    #
-    #     result = {
-    #         'inverse_dynamics_loss': idm_loss.item(),
-    #         'forward_dynamics_loss': fdm_loss.item(),
-    #         'intrinsic_reward': self._intrinsic_reward_weight * icm_rewards.mean().item(),
-    #
-    #         'inverse_dynamics_model_grad_norm': idm_grad_norm,
-    #         'forward_dynamics_model_grad_norm': fdm_grad_norm,
-    #         'dynamics_encoder_grad_norm': encoder_grad_norm,
-    #     }
-    #
-    #     return icm_rewards, result
 
     def _change_rewards(
             self,
@@ -146,18 +100,6 @@ class ICMOptimizer:
         self._dynamics_encoder_optimizer.zero_grad()
         return grad_norm.item()
 
-    def _optimize_fdm(
-            self, rollout_data_dict: Dict[str, Optional[torch.Tensor]]
-    ) -> Tuple[Dict[str, float], torch.Tensor]:
-        icm_rewards = self._forward_dynamics_optimizer.loss(rollout_data_dict)
-        fdm_loss = self._average_loss(icm_rewards, rollout_data_dict['mask'])
-        fdm_grad_norm = self._forward_dynamics_optimizer.optimize_loss(fdm_loss)
-        fdm_optimization_result = {
-            'forward_dynamics_loss': fdm_loss.item(),
-            'forward_dynamics_model_grad_norm': fdm_grad_norm.item()
-        }
-        return fdm_optimization_result, icm_rewards.detach()
-
     def train(
             self,
             rollout_data_dict: Dict[str, Optional[torch.Tensor]]
@@ -172,10 +114,12 @@ class ICMOptimizer:
         )
         if not self._allow_grads_from_fdm:
             rollout_data_dict['obs_emb'] = rollout_data_dict['obs_emb'].detach()
-        fdm_optimization_result, icm_rewards = self._optimize_fdm(rollout_data_dict)
+
+        fdm_optimization_result, icm_rewards = self._forward_dynamics_optimizer.train(
+            rollout_data_dict, return_averaged=False
+        )
 
         encoder_grad_norm = self._optimize_encoder()
-        # icm_rewards, result = self._train_dynamics(rollout_data_dict)
 
         ac_optimization_result, ac_time = dict(), dict()
         if self._step > self._warm_up_steps:
