@@ -2,12 +2,12 @@
 
 This repository contains parallel PyTorch implementation of some Reinforcement and Imitation Learning algorithms:
 A2C, PPO, BCO, GAIL, V-trace. Short description:
-- Advantage Actor Critic (A2C) - a synchronous variant of [*A3C*](https://arxiv.org/abs/1602.01783)
+- Advantage Actor-Critic (A2C) - a synchronous variant of [*A3C*](https://arxiv.org/abs/1602.01783)
 - Proximal Policy Optimization (PPO) - one of the most popular RL algorithms [*PPO*](https://arxiv.org/abs/1707.06347), 
                                [*Truly PPO*](https://arxiv.org/abs/1903.07940), 
                                [*Implementation Matters*](https://arxiv.org/abs/2005.12729), 
                                [*A Large-Scale Empirical Study of PPO*](https://arxiv.org/abs/2006.05990)
-- Behavioral Cloning from Observation (BCO) - technique to clone expert behaviour into agent using only expert states,
+- Behavioral Cloning from Observation (BCO) - technique to clone expert behavior into agent using only expert states,
                                               [*BCO*](https://arxiv.org/abs/1805.01954)
 - Generative Adversarial Imitation Learning (GAIL) - algorithm to mimic expert policy using discriminator as reward model
                                               [*GAIL*](https://arxiv.org/abs/1606.03476)
@@ -15,18 +15,18 @@ A2C, PPO, BCO, GAIL, V-trace. Short description:
 Each algorithm supports vector/image/dict observation spaces and discrete/continuous/tuple action spaces.
 Data gathering and training on it controlled by separate processes,
 parallelism scheme is described in [this file](cherry_rl/algorithms/parallel/readme.md).
-Code is written with focus on on-policy algorithms;
-Recurrent policies also supported.
+Code is written with a focus on on-policy algorithms;
+Recurrent policies are also supported.
 
 ## Current Functionality
 
 Each algorithm supports discrete (Categorical, Bernoulli, GumbelSoftmax)
 and continuous (Beta, Normal, tanh(Normal)) policy distributions,
-and there is additional 'Tuple' distribution which can be used for mixing distributions above. 
-For continuous action spaces Beta distribution works best in my experiments
+and there is additional 'Tuple' distribution that can be used for mixing distributions above. 
+For continuous action spaces, Beta distribution works best in my experiments
 (tested on BipedalWalker and Humanoid environments).
 
-Environments with vector, image or dict observation spaces are supported.
+Environments with vector, image, or dict observation spaces are supported.
 Recurrent policies are supported.
 
 Several returns estimation algorithms supported: 1-step, n-step, [*GAE*](https://arxiv.org/abs/1506.02438) and
@@ -54,13 +54,13 @@ pip install -e .
 
 #### Training example
 
-Each experiment is described in config, look at the [config](configs/cart_pole/cart_pole_ppo_annotated.py).
-To run experiment execute command:
+Each experiment is described in a config, look at the [config](configs/cart_pole/cart_pole_ppo_annotated.py).
+To run the experiment execute the command:
 ```bash
 python configs/cart_pole/cart_pole_ppo_annotated.py
 ```
 
-Training results (including training config, tensorboard logs and model checkpoints) will be saved in ```log_dir``` folder.
+Training results (including training config, tensorboard logs, and model checkpoints) will be saved in the ```log_dir``` folder.
 
 Obtained policy: 
 
@@ -72,18 +72,18 @@ Results of trained policy may be shown with ```cherry_rl/test.py``` script. To r
 python -m cherry_rl.test -f ${PATH_TO_LOG_DIR} -p ${CHECKPOINT_ID}
 ```
 This script is able to: 
-- just show how policy acts in environment
-- measure mean reward and episode len over requested number of episodes
+- just show how policy acts in the environment
+- measure mean reward and episode len over a requested number of episodes
 - record demo file with trajectories
 
-Execute ```python -m cherry_rl.test -h``` to see detailed description of available arguments.
+Execute ```python -m cherry_rl.test -h``` to see a detailed description of available arguments.
 
 #### Code structure
     .
     ├── cherry_rl                        # folder with code
         ├── algorithms                      # algorithmic part of code
             ├── nn                          # folder with neural networks definitions.
-                ├── agent_model.py          # special module for agent.
+                ├── agent_model.py          # special module for the agent.
                 └── ...                     # various nn models: actor-critics, convolutional & recurrent encoders.
             ├── optimizers                  # folder with RL optimizers. Each optimizer shares
                 ├── model_optimizer.py      # base optimizer for all models.
@@ -93,7 +93,7 @@ Execute ```python -m cherry_rl.test -h``` to see detailed description of availab
                 ├── readme.md               # description of used parallelism scheme
                 └── ...                     # modules responsible for parallel rollout gathering and training.
             ├── returns_estimator.py        # special module for estimating returns. Supported estimators: 
-            └── ...                         # all other algorithmic modules that does not fit in any other folder. 
+            └── ...                         # all other algorithmic modules that do not fit in any other folder. 
         ├── utils
             ├── vec_env.py                  # vector env (copy of OpenAI code, but w/o automatic resetting)
             └── ...                         # environment wrappers and other utils.
@@ -113,15 +113,15 @@ Execute ```python -m cherry_rl.test -h``` to see detailed description of availab
 
 #### Modular neural network definition
 Each agent have optional ```make_obs_encoder``` and ```obs_normalizer_size``` arguments.
-Observation encoder is an neural network (i.e. nn.Module), it applied directly to observation, typically an image.
-Observation normalizer is an running mean-variance estimator which standardize observations, it applied _before_ encoder. 
-Most of times actor-critic trains better on such zero-mean unit-variance observations or embeddings.
+Observation encoder is a neural network (i.e. nn.Module), it is applied directly to observation, typically an image.
+Observation normalizer is a running mean-variance estimator which standardizes observations, it applied _before_ encoder. 
+Most of the times actor-critic trains better on such zero-mean unit-variance observations or embeddings.
 
-To train your own neural network architecture you can just import or define it in config, 
+To train your own neural network architecture you can just import or define it in the config, 
 initialize it in ```make_ac_model``` function, and pass as ```make_actor_critic``` argument into ```AgentModel```.
 
 #### Trained environments
-GIFs of some of results:
+GIFs of some of the results:
 
 BipedalWalker-v3: mean reward ~333, 0 fails over 1000 episodes, [config](configs/bipedal/bipedal_ppo.py).
 
@@ -132,7 +132,7 @@ Humanoid-v3: mean reward ~11.3k, 14 fails over 1000 episodes, [config](configs/h
 ![humanoid](./gifs/humanoid.gif)
 
 Experiments with Humanoid done in mujoco v2 
-which have integration bug that makes environment easier. For academic purposes it is correct to use mujoco v1.5
+which have integration bug that makes the environment easier. For academic purposes, it is correct to use mujoco v1.5
 
 CarRacing-v0: mean reward = 894 ± 32, 26 fails over 100 episodes 
 (episode is considered failed if reward < 900), 

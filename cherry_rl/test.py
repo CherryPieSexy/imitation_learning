@@ -125,7 +125,7 @@ def play_n_episodes(
                     break
 
         if not silent:
-            print(f'episode_{i} done, len = {episode_len}, reward = {episode_reward}')
+            print(f'episode_{i + 1} done, len = {episode_len}, reward = {episode_reward}')
 
     print(f'mean(reward) = {np.mean(episode_rewards)}, std(reward) = {np.std(episode_rewards)}')
 

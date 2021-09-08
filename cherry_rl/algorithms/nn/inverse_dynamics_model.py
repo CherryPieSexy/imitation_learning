@@ -8,9 +8,11 @@ from cherry_rl.algorithms.distributions import distributions_dict
 class InverseDynamicsModel(nn.Module):
     def __init__(
             self,
-            observation_size, hidden_size, action_size,
-            distribution_str,
-            n_layers=3, activation_str='tanh', output_gain=1.0
+            observation_size: int,
+            hidden_size: int,
+            action_size: int,
+            distribution_str: str,
+            n_layers: int = 3, activation_str: str = 'tanh', output_gain: float = 1.0
     ):
         super().__init__()
         self.mlp = MLP(
@@ -21,6 +23,10 @@ class InverseDynamicsModel(nn.Module):
         if distribution_str != 'deterministic':
             self.action_distribution = distributions_dict[distribution_str]()
 
-    def forward(self, current_observation, next_observation):
+    def forward(
+            self,
+            current_observation: torch.Tensor,
+            next_observation: torch.Tensor
+    ) -> torch.Tensor:
         cat_observation = torch.cat([current_observation, next_observation], dim=-1)
         return self.mlp(cat_observation)
