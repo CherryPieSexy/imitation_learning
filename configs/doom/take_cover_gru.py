@@ -1,3 +1,5 @@
+from functools import partial
+
 import torch
 import torch.multiprocessing as mp
 
@@ -7,7 +9,8 @@ from cherry_rl.utils.utils import create_log_dir
 from cherry_rl.algorithms.nn.doom_cnn import DoomCNN
 from cherry_rl.algorithms.nn.recurrent_encoders import init, CompositeRnnEncoder, OneLayerActorCritic
 from cherry_rl.algorithms.nn.agent_model import AgentModel
-from cherry_rl.algorithms.optimizers.ppo import PPO
+
+from cherry_rl.algorithms.optimizers.rl.ppo import PPO
 
 import cherry_rl.algorithms.parallel as parallel
 
@@ -38,14 +41,14 @@ train_args = {
     'train_env_num': train_env_num, 'gamma': gamma, 'recurrent': recurrent,
     'log_dir': log_dir, 'n_plot_agents': 0
 }
-training_args = {'n_epoch': 20, 'n_steps_per_epoch': 5000, 'rollout_len': rollout_len}
+training_args = {'n_epoch': 20, 'n_steps_per_epoch': 2000, 'rollout_len': rollout_len}
 
-run_test_process = True
+run_test_process = False
 render_test_env = False
 test_process_act_deterministic = False
 
 
-def make_env(render=False):
+def make_env(render=True):
     def make():
         env = Doom('take_cover', set_window_visible=render, action_repeat=4)
         env = ImageEnvWrapper(env, convert_to_gray=False, x_size=128, y_size=72)
@@ -65,14 +68,15 @@ def make_encoder():
     return CompositeRnnEncoder(make, gru_hidden_size, gru_hidden_size)
 
 
-def make_ac_model():
+def make_ac_model(ac_device):
     def make_ac():
         return OneLayerActorCritic(**ac_args)
 
     model = AgentModel(
-        device, make_ac, distribution_str,
+        ac_device, make_ac, distribution_str,
         make_obs_encoder=make_encoder,
-        reward_scaler_size=1, value_normalizer_size=1
+        reward_scaler_size=1,
+        value_normalizer_size=1
     )
     return model
 
@@ -84,9 +88,11 @@ def make_optimizer(model):
 def main():
     create_log_dir(log_dir, __file__)
     parallel.run(
-        log_dir, make_env, make_ac_model, render_test_env,
+        log_dir, partial(make_env, render=False), make_ac_model, device,
         make_optimizer, train_args, training_args,
-        run_test_process=run_test_process
+        run_test_process=run_test_process,
+        render_test_env=render_test_env,
+        test_process_act_deterministic=test_process_act_deterministic
     )
 
 
