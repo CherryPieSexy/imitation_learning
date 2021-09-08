@@ -302,6 +302,3 @@ distributions_dict = {
     'TanhNormal': TanhNormal,
     'Normal': Normal,
 }
-
-# truly continuous
-continuous_distributions = ['Beta', 'WideBeta', 'Normal', 'TanhNormal']
