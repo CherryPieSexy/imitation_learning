@@ -7,9 +7,10 @@ from cherry_rl.utils.utils import create_log_dir
 
 from cherry_rl.algorithms.demo_buffer import TransitionsDemoBuffer
 from cherry_rl.algorithms.nn.actor_critic import MLP, ActorCriticTwoMLP
+from cherry_rl.algorithms.distributions import Categorical
 from cherry_rl.algorithms.nn.agent_model import AgentModel
 from cherry_rl.algorithms.optimizers.rl.ppo import PPO
-from cherry_rl.algorithms.optimizers.gail.discriminator_optimizer import DiscriminatorOptimizer
+from cherry_rl.algorithms.optimizers.gail.discriminator_optimizer import DiscriminatorOptimizer, neg_log_sigmoid
 from cherry_rl.algorithms.optimizers.gail.gail import GAIL
 
 import cherry_rl.algorithms.parallel as parallel
@@ -19,7 +20,7 @@ log_dir = 'logs/cart_pole/exp_6_gail/'
 device = torch.device('cpu')
 recurrent = False
 
-distribution_str = 'Categorical'
+distribution = Categorical
 
 demo_file = 'configs/cart_pole/cart_pole_demo_10_ep.pickle'
 
@@ -55,14 +56,16 @@ def make_env():
 def make_ac_model(ac_device):
     def make_ac():
         return ActorCriticTwoMLP(**ac_args)
-    model = AgentModel(ac_device, make_ac, distribution_str)
+    model = AgentModel(ac_device, make_ac, distribution)
     return model
 
 
 def make_optimizer(model):
     ppo = PPO(model, **ppo_args)
     discriminator = MLP(**discriminator_args)
-    discriminator_optimizer = DiscriminatorOptimizer(discriminator, learning_rate=3e-4, clip_grad=0.5)
+    discriminator_optimizer = DiscriminatorOptimizer(
+        discriminator, learning_rate=3e-4, clip_grad=0.5, reward_fn=neg_log_sigmoid
+    )
     demo_buffer = TransitionsDemoBuffer(demo_file, 4 * 16)
     gail = GAIL(ppo, discriminator_optimizer, demo_buffer)
     return gail

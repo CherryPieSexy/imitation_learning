@@ -26,7 +26,7 @@ class TrainAgent:
             queue_to_tb_writer,  # send logs to writing
             n_plot_agents=1,
             average_n_episodes=20,
-            reward_shape=1,
+            reward_size=1,
             select_reward_to_plot_fn=default_select_reward_to_plot
     ):
         self._env = SubprocVecEnv([make_env() for _ in range(train_env_num)])
@@ -43,8 +43,8 @@ class TrainAgent:
         self._n_plot_agents = n_plot_agents
         self._average_n_episodes = average_n_episodes
 
-        self._env_total_reward = np.zeros((self._env.num_envs, reward_shape), dtype=np.float32)
-        self._env_discounted_return = np.zeros((self._env.num_envs, reward_shape), dtype=np.float32)
+        self._env_total_reward = np.zeros((self._env.num_envs, reward_size), dtype=np.float32)
+        self._env_discounted_return = np.zeros((self._env.num_envs, reward_size), dtype=np.float32)
         self._select_reward_to_plot_fn = select_reward_to_plot_fn
 
         self._env_episode_len = np.zeros(self._env.num_envs, dtype=np.int32)
@@ -100,7 +100,7 @@ class TrainAgent:
         ))
 
     def _small_done_callback(self, i):
-        self._last_total_rewards.append(self._env_total_reward[i])
+        self._last_total_rewards.append(np.copy(self._env_total_reward[i]))
         self._last_lengths.append(self._env_episode_len[i])
         if len(self._last_total_rewards) == self._average_n_episodes:
             self._plot_average()
@@ -108,7 +108,7 @@ class TrainAgent:
         if i < self._n_plot_agents:
             self._plot_agent(i)
 
-        self._env_total_reward[i] = 0.0
+        self._env_total_reward[i] *= 0
         self._env_episode_len[i] = 0
         self._env_episode_number[i] += 1
 

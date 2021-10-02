@@ -1,3 +1,5 @@
+# WARNING: this config is not supported now
+
 import gym
 import torch
 import torch.multiprocessing as mp

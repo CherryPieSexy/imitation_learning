@@ -7,6 +7,7 @@ import cherry_rl.utils.env_wrappers as wrappers
 from cherry_rl.utils.utils import create_log_dir
 
 from cherry_rl.algorithms.nn.recurrent_encoders import init, CompositeRnnEncoder, OneLayerActorCritic
+from cherry_rl.algorithms.distributions import Categorical
 from cherry_rl.algorithms.nn.agent_model import AgentModel
 from cherry_rl.algorithms.optimizers.rl.ppo import PPO
 
@@ -17,7 +18,7 @@ log_dir = 'logs/cart_pole/exp_4_ppo_gru/'
 device = torch.device('cpu')
 recurrent = True
 
-distribution_str = 'Categorical'
+distribution = Categorical
 
 observation_size = 4
 hidden_size = 16
@@ -61,7 +62,7 @@ def make_ac_model(ac_device):
     def make_ac():
         return OneLayerActorCritic(**ac_args)
     model = AgentModel(
-        ac_device, make_ac, distribution_str,
+        ac_device, make_ac, distribution,
         make_obs_encoder=make_encoder
     )
     return model

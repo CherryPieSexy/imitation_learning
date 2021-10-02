@@ -6,6 +6,7 @@ import cherry_rl.utils.env_wrappers as wrappers
 from cherry_rl.utils.utils import create_log_dir
 
 from cherry_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
+from cherry_rl.algorithms.distributions import Categorical
 from cherry_rl.algorithms.nn.agent_model import AgentModel
 from cherry_rl.algorithms.optimizers.rl.a2c import A2C
 
@@ -15,11 +16,11 @@ import cherry_rl.algorithms.parallel as parallel
 # WARNING: this config can't give stable results. It may converge in 1 or 10 minutes.
 # Possible reason: parallel training and rollout gathering and off-policy updates.
 # Sequential A2C should converge in ~20 seconds.
-log_dir = 'logs/cart_pole/exp_1_a2c/'
+log_dir = 'logs/cart_pole/exp_1_a2c_2/'
 device = torch.device('cpu')
 recurrent = False
 
-distribution_str = 'Categorical'
+distribution = Categorical
 
 ac_args = {'input_size': 4, 'hidden_size': 16, 'action_size': 2}
 a2c_args = {'learning_rate': 0.01, 'returns_estimator': '1-step'}
@@ -45,7 +46,7 @@ def make_env():
 def make_ac_model(ac_device):
     def make_ac():
         return ActorCriticTwoMLP(**ac_args)
-    model = AgentModel(ac_device, make_ac, distribution_str)
+    model = AgentModel(ac_device, make_ac, distribution)
     return model
 
 

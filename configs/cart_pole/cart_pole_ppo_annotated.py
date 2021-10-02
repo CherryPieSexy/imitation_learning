@@ -7,6 +7,7 @@ import cherry_rl.utils.env_wrappers as wrappers
 from cherry_rl.utils.utils import create_log_dir
 
 from cherry_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
+from cherry_rl.algorithms.distributions import Categorical
 from cherry_rl.algorithms.nn.agent_model import AgentModel
 from cherry_rl.algorithms.optimizers.rl.ppo import PPO
 
@@ -17,7 +18,7 @@ log_dir = 'logs/cart_pole/exp_3_ppo_annotated/'  # tensorboard logs and checkpoi
 device = torch.device('cpu')
 recurrent = False
 
-distribution_str = 'Categorical'  # policy distribution for discrete action space
+distribution = Categorical  # policy distribution for discrete action space
 
 ac_args = {'input_size': 4, 'hidden_size': 16, 'action_size': 2}  # actor-critic mlp args
 # PPO optimizer args
@@ -61,7 +62,7 @@ def make_env():
 def make_ac_model(ac_device):
     def make_ac():
         return ActorCriticTwoMLP(**ac_args)
-    model = AgentModel(ac_device, make_ac, distribution_str)
+    model = AgentModel(ac_device, make_ac, distribution)
     return model
 
 
