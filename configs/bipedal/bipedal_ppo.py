@@ -6,6 +6,7 @@ import cherry_rl.utils.env_wrappers as wrappers
 from cherry_rl.utils.utils import create_log_dir
 
 from cherry_rl.algorithms.nn.actor_critic import ActorCriticTwoMLP
+from cherry_rl.algorithms.distributions import Beta
 from cherry_rl.algorithms.nn.agent_model import AgentModel
 from cherry_rl.algorithms.optimizers.rl.ppo import PPO
 
@@ -19,7 +20,7 @@ recurrent = False
 observation_size = 24
 hidden_size = 64
 action_size = 4
-distribution_str = 'Beta'
+distribution = Beta
 
 gamma = 0.99
 train_env_num = 32
@@ -56,7 +57,7 @@ def make_ac_model(ac_device):
     def make_ac():
         return ActorCriticTwoMLP(**ac_args)
     model = AgentModel(
-        ac_device, make_ac, distribution_str,
+        ac_device, make_ac, distribution,
         obs_normalizer_size=observation_size,
         reward_normalizer_size=1,
         value_normalizer_size=1
