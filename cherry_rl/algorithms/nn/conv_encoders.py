@@ -6,7 +6,7 @@ from cherry_rl.algorithms.nn.actor_critic import init, activations_dict
 
 def cnn_forward(cnn, observation):
     if type(observation) is dict:
-        img = observation.pop('img')
+        img = observation['img']
     else:
         img = observation
 
@@ -25,7 +25,7 @@ def cnn_forward(cnn, observation):
         conv_features = conv_features.view(time, batch, -1)
 
     if type(observation) is dict:
-        observation['features'] = conv_features
+        observation['embedding'] = conv_features
         return observation
     else:
         return conv_features

@@ -43,7 +43,8 @@ class RunningMeanStd(nn.Module):
 
     def denormalize(self, x):
         # this method is only used for value, dict support is not necessary.
-        x = self.mean + x * torch.clamp_min(torch.sqrt(self.var), 1e-6)
+        # x = self.mean + x * torch.clamp_min(torch.sqrt(self.var), 1e-6)
+        x = x * torch.clamp_min(torch.sqrt(self.var), 1e-6)
         return x
 
     def update(self, x, mask):

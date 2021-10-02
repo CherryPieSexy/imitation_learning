@@ -8,6 +8,10 @@ from cherry_rl.utils.vec_env import SubprocVecEnv
 from cherry_rl.algorithms.rollout import Rollout
 
 
+def default_select_reward_to_plot(reward):
+    return np.asarray(reward)[..., 0]
+
+
 class TrainAgent:
     """
     Basically copy of the old 'OnPolicyTrainer' but with queues and pipes.
@@ -21,7 +25,9 @@ class TrainAgent:
             pipe_from_model,  # receive actions from online model
             queue_to_tb_writer,  # send logs to writing
             n_plot_agents=1,
-            average_n_episodes=20
+            average_n_episodes=20,
+            reward_shape=1,
+            select_reward_to_plot_fn=default_select_reward_to_plot
     ):
         self._env = SubprocVecEnv([make_env() for _ in range(train_env_num)])
         self._gamma = gamma
@@ -36,27 +42,31 @@ class TrainAgent:
 
         self._n_plot_agents = n_plot_agents
         self._average_n_episodes = average_n_episodes
-        self._env_total_reward = np.zeros(self._env.num_envs, dtype=np.float32)
-        self._env_discounted_return = np.zeros(self._env.num_envs, dtype=np.float32)
+
+        self._env_total_reward = np.zeros((self._env.num_envs, reward_shape), dtype=np.float32)
+        self._env_discounted_return = np.zeros((self._env.num_envs, reward_shape), dtype=np.float32)
+        self._select_reward_to_plot_fn = select_reward_to_plot_fn
+
         self._env_episode_len = np.zeros(self._env.num_envs, dtype=np.int32)
         self._env_episode_number = np.zeros(self._env.num_envs, dtype=np.int32)
         self._last_total_rewards = []
         self._last_lengths = []
 
-        self._alive_env = np.array([False for _ in range(self._env.num_envs)])
+        self._alive_env = np.array([[1] for _ in range(self._env.num_envs)])
         self._gather_steps_done = 0
 
     def _update_running_statistics(self, raw_reward):
         self._env_total_reward += raw_reward * self._alive_env
-        self._env_episode_len += 1 * self._alive_env
+        self._env_episode_len += 1 * self._alive_env.squeeze(-1)
         self._env_discounted_return = self._gamma * self._env_discounted_return + raw_reward * self._alive_env
 
     def _plot_average(self):
+        last_total_rewards = self._select_reward_to_plot_fn(self._last_total_rewards)
         self._queue_to_tb_writer.put((
             'add_scalars',
             (
                 'agents/train_reward/',
-                {'agent_mean': sum(self._last_total_rewards) / self._average_n_episodes},
+                {'agent_mean': sum(last_total_rewards) / self._average_n_episodes},
                 self._env_episode_number[0]
             )
         ))
@@ -76,7 +86,7 @@ class TrainAgent:
             'add_scalars',
             (
                 'agents/train_reward/',
-                {f'agent_{i}': self._env_total_reward[i]},
+                {f'agent_{i}': self._select_reward_to_plot_fn(self._env_total_reward[i])},
                 self._env_episode_number[i]
             )
         ))
@@ -124,14 +134,14 @@ class TrainAgent:
             observation[ids] = reset_observations
         for i, idx in enumerate(reset_ids):
             if idx:
-                self._alive_env[i] = True
+                self._alive_env[i, 0] = True
         return observation
 
     def _done_callback(self, observation, done):
         if np.any(done):
             for i, d in enumerate(done):
-                if d and self._alive_env[i]:
-                    self._alive_env[i] = False
+                if d and self._alive_env[i, 0]:
+                    self._alive_env[i, 0] = 0
                     self._small_done_callback(i)
             if not self._recurrent:
                 observation = self._reset_env_and_memory_by_ids(observation, done)
@@ -149,12 +159,11 @@ class TrainAgent:
 
         return self._env.step(env_action)
 
-    @staticmethod
-    def _clone(x):
+    def _clone(self, x):
         if x is None:
             return None
         elif type(x) is tuple:
-            return tuple([xx.clone() for xx in x])
+            return tuple([self._clone(xx) for xx in x])
         else:
             return x.clone()
 
@@ -174,6 +183,8 @@ class TrainAgent:
 
         env_result, env_time = self._env_step(action)
         observation, reward, done, info = env_result
+        if len(reward.shape) == 1:
+            reward = reward[..., None]
         self._update_running_statistics(reward)
         observation = self._done_callback(observation, done)
 
@@ -214,9 +225,8 @@ class TrainAgent:
         }
         return observation, rollout, time_log
 
-    @staticmethod
-    def _reward_statistics(rollout):
-        rewards = rollout.get('rewards')
+    def _reward_statistics(self, rollout):
+        rewards = self._select_reward_to_plot_fn(rollout.get('rewards'))[..., None]
         mask = rollout.get('mask').unsqueeze(-1)
         mean = (mask * rewards).sum() / mask.sum()
         mean_2 = (mask * rewards ** 2).sum() / mask.sum()
@@ -247,7 +257,7 @@ class TrainAgent:
     def train(self, n_epoch, n_steps_per_epoch, rollout_len):
         self._queue_to_optimizer.put(('save', self._log_dir + 'checkpoints/epoch_0.pth'))
         observation = self._env.reset()
-        self._alive_env = np.array([True for _ in range(self._env.num_envs)])
+        self._alive_env = np.array([[1] for _ in range(self._env.num_envs)])
 
         for epoch in range(n_epoch):
             p_bar = trange(n_steps_per_epoch, ncols=90, desc=f'epoch_{epoch + 1}')

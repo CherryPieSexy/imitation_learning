@@ -50,7 +50,10 @@ def _recurrent_data_generator(data_dict, num_sequences):
     for _, time_id in enumerate(range(0, batch, step_size)):
         col = batch_indices[time_id:time_id + step_size]
         selected = _select_col(data_dict, col)
-        selected['observations'] = selected['observations'][:-1]
+        if type(selected['observations']) is dict:
+            selected['observations'] = {k: v[:-1] for k, v in selected['observations'].items()}
+        else:
+            selected['observations'] = selected['observations'][:-1]
         yield selected
 
 

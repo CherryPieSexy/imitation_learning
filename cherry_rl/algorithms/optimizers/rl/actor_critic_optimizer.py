@@ -27,7 +27,7 @@ class ActorCriticOptimizer(ModelOptimizer):
         self.normalize_adv = normalize_adv
         self.returns_estimator = ReturnsEstimator(returns_estimator, gamma, gae_lambda)
 
-    def optimize_loss(self, loss):
+    def optimize_loss(self, loss, **kwargs):
         self.optimizer.zero_grad()
         loss.backward()
         gradient_norms = {}

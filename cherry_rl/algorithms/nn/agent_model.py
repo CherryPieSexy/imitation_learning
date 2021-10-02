@@ -59,6 +59,8 @@ class AgentModel(torch.nn.Module):
 
         if self.reward_scaler is not None:
             self.reward_scaler.subtract_mean = False
+        if self.value_normalizer is not None:
+            self.value_normalizer.subtract_mean = False
 
         self.recurrent = hasattr(self.obs_encoder, 'recurrent')
 

@@ -34,12 +34,6 @@ class Rollout:
         self._alive_env = [True for _ in range(_env_num(observation))]
         self._mask = []
 
-    @staticmethod
-    def _unsqueeze(v):
-        if v.dim() == 1:
-            return v.unsqueeze(-1)
-        return v
-
     def _x_to_tensor(self, x):
         if type(x) is np.ndarray:
             return torch.tensor(x, dtype=torch.float32)
@@ -63,9 +57,8 @@ class Rollout:
             )
         self._alive_env = 1.0 - done
 
-        x['reward'] = self._unsqueeze(x['reward'])
-        x['return'] = self._unsqueeze(x['return'])
-        x['done'] = self._unsqueeze(x['done'])
+        if x['done'].dim() == 1:
+            x['done'] = x['done'].unsqueeze(-1)
         self._data.append(x)
 
     def get(self, key, default=None):
