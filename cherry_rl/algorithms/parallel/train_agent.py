@@ -8,8 +8,17 @@ from cherry_rl.utils.vec_env import SubprocVecEnv
 from cherry_rl.algorithms.rollout import Rollout
 
 
-def default_select_reward_to_plot(reward):
-    return np.asarray(reward)[..., 0]
+# noinspection PyUnusedLocal
+def default_select_reward_to_plot(reward, idx):
+    """
+    Function to select reward for plotting in case of vectorized reward.
+    Useful for two-players games.
+
+    :param reward: tensor or numpy array of shape [reward size],
+    :param idx:    index of environment from reward was obtained.
+    :return:       scalar reward
+    """
+    return reward[..., 0]
 
 
 class TrainAgent:
@@ -61,12 +70,11 @@ class TrainAgent:
         self._env_discounted_return = self._gamma * self._env_discounted_return + raw_reward * self._alive_env
 
     def _plot_average(self):
-        last_total_rewards = self._select_reward_to_plot_fn(self._last_total_rewards)
         self._queue_to_tb_writer.put((
             'add_scalars',
             (
                 'agents/train_reward/',
-                {'agent_mean': sum(last_total_rewards) / self._average_n_episodes},
+                {'agent_mean': sum(self._last_total_rewards) / self._average_n_episodes},
                 self._env_episode_number[0]
             )
         ))
@@ -86,7 +94,7 @@ class TrainAgent:
             'add_scalars',
             (
                 'agents/train_reward/',
-                {f'agent_{i}': self._select_reward_to_plot_fn(self._env_total_reward[i])},
+                {f'agent_{i}': self._select_reward_to_plot_fn(self._env_total_reward[i], i)},
                 self._env_episode_number[i]
             )
         ))
@@ -100,7 +108,8 @@ class TrainAgent:
         ))
 
     def _small_done_callback(self, i):
-        self._last_total_rewards.append(np.copy(self._env_total_reward[i]))
+        selected_reward = self._select_reward_to_plot_fn(self._env_total_reward[i], i)
+        self._last_total_rewards.append(np.copy(selected_reward))
         self._last_lengths.append(self._env_episode_len[i])
         if len(self._last_total_rewards) == self._average_n_episodes:
             self._plot_average()
@@ -228,7 +237,11 @@ class TrainAgent:
         return observation, rollout, time_log
 
     def _reward_statistics(self, rollout):
-        rewards = self._select_reward_to_plot_fn(rollout.get('rewards'))[..., None]
+        rewards = self._select_reward_to_plot_fn(
+            rollout.get('rewards'),
+            [[[i] for i in range(self._env.num_envs)]]  # add time and reward dimensions
+        )[..., None]
+        # rewards in rollout has shape [T, B, D], but selection must be same for each element and differ only by batch
         mask = rollout.get('mask').unsqueeze(-1)
         mean = (mask * rewards).sum() / mask.sum()
         mean_2 = (mask * rewards ** 2).sum() / mask.sum()

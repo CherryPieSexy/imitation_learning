@@ -46,14 +46,16 @@ class ActionRepeatAndRenderWrapper(gym.Wrapper):
     Must be applied for every environment since it do rendering during
     calling step method with render=True kwarg.
     """
-    def __init__(self, env, action_repeat=1):
+    def __init__(self, env, action_repeat=1, reward_size=1):
         super().__init__(env)
         self._action_repeat = action_repeat
+        self._reward_size = reward_size
 
     def step(self, action, render=False):
-        reward = 0.0
+        reward = np.zeros(self._reward_size)
         for _ in range(self._action_repeat):
             obs, r, done, info = self.env.step(action)
+            r = np.array(r)
             if render:
                 self.env.render()
             reward += r
