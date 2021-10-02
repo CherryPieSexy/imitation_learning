@@ -39,6 +39,7 @@ class ModelProcess:
                     break
                 else:
                     raise NotImplementedError
+                del data
                 self.send_result(sender, result)
         except KeyboardInterrupt:
             print('model worker: got KeyboardInterrupt')

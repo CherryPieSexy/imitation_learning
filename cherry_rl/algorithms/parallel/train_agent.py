@@ -120,11 +120,12 @@ class TrainAgent:
 
     def _reset_env_and_memory_by_ids(self, observation, reset_ids):
         ids = [i for i, d in enumerate(reset_ids) if d]
-        self._model_memory = self._queue_to_model.put((
+        self._queue_to_model.put((
             'reset_memory', 'train_agent', (self._model_memory, reset_ids)
         ))
-        self._model_memory = self._pipe_from_model.recv()
-        self._model_memory = self._clone(self._model_memory)
+        model_memory = self._pipe_from_model.recv()
+        self._model_memory = self._clone(model_memory)
+        del model_memory
         reset_observations = self._env.reset_ids(reset_ids)
         # TODO: this MUST be carefully tested.
         if type(observation) is dict:
@@ -173,13 +174,14 @@ class TrainAgent:
             'act', 'train_agent', (observation, self._model_memory, False)
         ))
         act_result = self._pipe_from_model.recv()
-        act_result = {
+        act_result_clone = {
             k: self._clone(v)
             for k, v in act_result.items()
         }
+        del act_result
         act_time = time.time() - start_time
-        action = act_result['action']
-        self._model_memory = act_result.pop('memory')
+        action = act_result_clone['action']
+        self._model_memory = act_result_clone.pop('memory')
 
         env_result, env_time = self._env_step(action)
         observation, reward, done, info = env_result
@@ -194,7 +196,7 @@ class TrainAgent:
             'return': self._env_discounted_return,
             'done': done,
             'info': info,
-            **act_result
+            **act_result_clone
         }
         self._reset_discounted_returns(done)
         return result, act_time, env_time

@@ -47,6 +47,7 @@ class TestAgentProcess:
             action = act_result['action'][0]
             memory = clone(act_result['memory'])
             env_action = self._env_action(action)
+            del act_result
 
             observation, reward, done, info = env.step(env_action, render=self._render)
 

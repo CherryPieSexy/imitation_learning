@@ -22,6 +22,7 @@ class TensorBoardWriterProcess:
                     break
                 else:
                     raise NotImplementedError
+                del data
         except KeyboardInterrupt:
             print('tb_writer worker: got KeyboardInterrupt')
         finally:

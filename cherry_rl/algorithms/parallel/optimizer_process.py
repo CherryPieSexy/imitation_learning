@@ -30,5 +30,6 @@ class OptimizerProcess:
                     break
                 else:
                     raise NotImplementedError
+                del data
         except KeyboardInterrupt:
             print('optimizer worker: got KeyboardInterrupt')
