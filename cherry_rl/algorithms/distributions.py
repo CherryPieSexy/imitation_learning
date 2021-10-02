@@ -14,7 +14,8 @@ def atanh(x):
 
 # Distributions is used to sample actions or states, compute log-probs and entropy
 class Distribution:
-    def sample(self, parameters, deterministic):
+    def sample(self, parameters, deterministic: bool):
+        # should return sample and log-prob
         raise NotImplementedError
 
     def log_prob(self, parameters, sample):
@@ -252,10 +253,10 @@ class TupleDistribution(Distribution):
     """
     def __init__(self, distributions, sizes):
         """
-        :param distributions: list of strings - names of distributions.
+        :param distributions: list of distributions classes.
         :param sizes: size (number of parameters) for each distribution.
         """
-        self._distributions = [distributions_dict[d]() for d in distributions]
+        self._distributions = [d() for d in distributions]
         self._sizes = sizes
 
     def sample(self, parameters, deterministic):
@@ -293,12 +294,16 @@ class TupleDistribution(Distribution):
         return entropy
 
 
-distributions_dict = {
-    'Categorical': Categorical,
-    'GumbelSoftmax': GumbelSoftmax,
-    'Bernoulli': Bernoulli,
-    'Beta': Beta,
-    'WideBeta': WideBeta,
-    'TanhNormal': TanhNormal,
-    'Normal': Normal,
-}
+class Deterministic(Distribution):
+    """
+    Fake deterministic continuous distribution.
+    Log-prob equals to negative MSE between parameters and sample.
+    """
+    def sample(self, parameters, deterministic):
+        return parameters, torch.zeros_like(parameters.sum(-1))
+
+    def log_prob(self, parameters, sample):
+        return -0.5 * (parameters - sample) ** 2
+
+    def entropy(self, parameters):
+        return 0

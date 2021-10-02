@@ -8,24 +8,8 @@ from cherry_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
 class InverseDynamicsOptimizer(ModelOptimizer):
     """
     Optimizer for inverse dynamics model, i.e. function f: a ~ f(s, s').
-    Can optimize deterministic dynamics (use mse as loss) and stochastic (use log-prob as loss).
+    Optimizes dynamics using log-prob as loss.
     """
-    # id = inverse dynamics
-    def _id_loss(
-            self,
-            model_prediction: torch.Tensor,
-            actions: torch.Tensor
-    ) -> torch.Tensor:
-        if self.model.action_distribution_str == 'deterministic':
-            loss = 0.5 * (model_prediction - actions) ** 2
-            loss = loss.mean(-1)
-        else:
-            actions_log_prob = self.model.action_distribution.log_prob(
-                model_prediction, actions
-            )
-            loss = -actions_log_prob
-        return loss
-
     def loss(
             self,
             rollout_data_dict: Dict[str, Optional[torch.Tensor]]
@@ -36,7 +20,10 @@ class InverseDynamicsOptimizer(ModelOptimizer):
         actions = rollout_data_dict['actions']
 
         model_prediction = self.model(current_observations, next_observations)
-        loss = self._id_loss(model_prediction, actions)
+        actions_log_prob = self.model.action_distribution.log_prob(
+            model_prediction, actions
+        )
+        loss = -actions_log_prob
 
         return loss
 

@@ -8,7 +8,7 @@ A2C, PPO, BCO, GAIL, V-trace. Short description:
                                [*Implementation Matters*](https://arxiv.org/abs/2005.12729), 
                                [*A Large-Scale Empirical Study of PPO*](https://arxiv.org/abs/2006.05990)
 - Behavioral Cloning from Observation (BCO) - technique to clone expert behavior into agent using only expert states,
-                                              [*BCO*](https://arxiv.org/abs/1805.01954)
+                                              [*BCO*](https://arxiv.org/abs/1805.01954) (works bad for me, not supported now)
 - Generative Adversarial Imitation Learning (GAIL) - algorithm to mimic expert policy using discriminator as reward model
                                               [*GAIL*](https://arxiv.org/abs/1606.03476)
 

@@ -1,8 +1,9 @@
+from typing import Callable
+
 import torch
 import torch.nn as nn
 
 from cherry_rl.algorithms.nn.actor_critic import init, MLP
-from cherry_rl.algorithms.distributions import distributions_dict
 
 
 class ForwardDynamicsModel(nn.Module):
@@ -24,11 +25,8 @@ class ForwardDynamicsModel(nn.Module):
             deterministic: bool = False
     ) -> torch.Tensor:
         model_output = self.forward(observation, action)
-        if self.state_distribution_str == 'deterministic':
-            return model_output
-        else:
-            sample, log_prob = self.state_distribution.sample(model_output, deterministic)
-            return sample
+        sample, log_prob = self.state_distribution.sample(model_output, deterministic)
+        return sample
 
 
 class ForwardDynamicsContinuousActionsModel(ForwardDynamicsModel):
@@ -37,21 +35,16 @@ class ForwardDynamicsContinuousActionsModel(ForwardDynamicsModel):
             observation_size: int,
             hidden_size: int,
             action_size: int,
-            state_distribution_str: str,
+            make_state_distribution: Callable,
             n_layers: int = 3, activation_str: str = 'tanh', output_gain: float = 1.0
     ):
-        assert \
-            state_distribution_str in ['deterministic', 'RNormal'],\
-            "Only 'deterministic' and 'Normal' distributions are supported for forward dynamics model"
         super().__init__()
 
         self.mlp = MLP(
             observation_size + action_size, hidden_size, observation_size,
             n_layers=n_layers, activation_str=activation_str, output_gain=output_gain
         )
-        self.state_distribution_str = state_distribution_str
-        if state_distribution_str != 'deterministic':
-            self.state_distribution = distributions_dict[state_distribution_str]()
+        self.state_distribution = make_state_distribution()
 
     def forward(
             self,
@@ -69,12 +62,9 @@ class ForwardDynamicsDiscreteActionsModel(ForwardDynamicsModel):
             hidden_size: int,
             action_size: int,
             action_distribution_str: str,  # one from [Categorical, Gumbel, Bernoulli]
-            state_distribution_str: str,
+            make_state_distribution: Callable,
             n_layers: int = 3, activation_str: str = 'tanh', output_gain: float = 1.0
     ):
-        assert \
-            state_distribution_str in ['deterministic', 'RNormal'], \
-            "Only 'deterministic' and 'Normal' distributions are supported for forward dynamics model"
         super().__init__()
 
         self.observation_embedding = nn.Linear(observation_size, hidden_size)
@@ -87,10 +77,7 @@ class ForwardDynamicsDiscreteActionsModel(ForwardDynamicsModel):
             2 * hidden_size, hidden_size, observation_size,
             n_layers=n_layers - 1, activation_str=activation_str, output_gain=output_gain
         )
-
-        self.state_distribution_str = state_distribution_str
-        if state_distribution_str != 'deterministic':
-            self.state_distribution = distributions_dict[state_distribution_str]()
+        self.state_distribution = make_state_distribution()
 
     def forward(
             self,

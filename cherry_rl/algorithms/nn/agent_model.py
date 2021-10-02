@@ -1,8 +1,6 @@
 import torch
 
 from cherry_rl.algorithms.normalization import RunningMeanStd
-from cherry_rl.algorithms.distributions import distributions_dict, TupleDistribution
-from cherry_rl.algorithms.real_nvp import RealNVPDistribution
 
 
 class AgentModel(torch.nn.Module):
@@ -17,9 +15,7 @@ class AgentModel(torch.nn.Module):
             self,
             device,
             make_actor_critic,
-            distribution_str,
-            distribution_size=None,
-            distribution_args=None,
+            make_policy_distribution,
             obs_normalizer_size=None,
             make_obs_encoder=None,
             reward_normalizer_size=None,
@@ -34,9 +30,7 @@ class AgentModel(torch.nn.Module):
                    obs.size() = (T, B, dim(obs))
                    policy.size() == (T, B, dim(A) or 2 * dim(A))
                    value.size() == (T, B, dim(value))
-        :param distribution_str: distribution type, str or tuple of str.
-        :param distribution_size: size (number of parameters) for each distribution.
-        :param distribution_args: arguments for RealNVP distribution.
+        :param make_policy_distribution: policy distribution factory.
         :param obs_normalizer_size: observation normalizer size, None or int.
                                     If None then no normalization is applied to observations.
         :param make_obs_encoder: observation encoder factory.
@@ -59,18 +53,10 @@ class AgentModel(torch.nn.Module):
 
         if self.reward_scaler is not None:
             self.reward_scaler.subtract_mean = False
-        if self.value_normalizer is not None:
-            self.value_normalizer.subtract_mean = False
 
         self.recurrent = hasattr(self.obs_encoder, 'recurrent')
 
-        self.pi_distribution_str = distribution_str
-        if type(distribution_str) is tuple:
-            self.pi_distribution = TupleDistribution(distribution_str, distribution_size)
-        elif distribution_str == 'RealNVP':
-            self.pi_distribution = RealNVPDistribution(**distribution_args)
-        else:
-            self.pi_distribution = distributions_dict[distribution_str]()
+        self.pi_distribution = make_policy_distribution()
 
     def _make_normalizer(self, size):
         return RunningMeanStd(size=(size,)).to(self.device) if size is not None else None

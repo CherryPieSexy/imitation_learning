@@ -1,16 +1,25 @@
+from typing import Callable
+
 import torch
 from torch.nn.functional import softplus
 
 from cherry_rl.algorithms.optimizers.model_optimizer import ModelOptimizer
 
 
-reward_functions = {
-    'logit': lambda x: x,  # (-inf, +inf)
-    'sigmoid': lambda x: torch.sigmoid(x),  # (0, 1)
-    'log_sigmoid': lambda x: torch.log(torch.sigmoid(x)),  # (-inf, 0)
-    'neg_log_sigmoid': lambda x: -torch.log(1.0 - torch.sigmoid(x)),  # (0, +inf)
-    'log_sum': lambda x: torch.log(torch.sigmoid(x)) - torch.log(1.0 - torch.sigmoid(x))  # TODO
-}
+# logit - lambda x: x
+# sigmoid - torch.sigmoid
+def log_sigmoid(x):
+    # (-inf, 0)
+    return torch.log(torch.sigmoid(x))
+
+
+def neg_log_sigmoid(x):
+    # (0, +inf)
+    return -torch.log(1.0 - torch.sigmoid(x))
+
+
+def log_sum(x):
+    return torch.log(torch.sigmoid(x)) - torch.log(1.0 - torch.sigmoid(x))
 
 
 class DiscriminatorOptimizer(ModelOptimizer):
@@ -25,13 +34,14 @@ class DiscriminatorOptimizer(ModelOptimizer):
     """
     def __init__(
             self,
-            model, learning_rate, clip_grad,
-            reward_type='neg_log_sigmoid',
-            discriminator_with_actions=False
+            model,
+            learning_rate: float,
+            clip_grad: float,
+            reward_fn: Callable = lambda x: x,
+            discriminator_with_actions: bool = False
     ):
         super().__init__(model, learning_rate, clip_grad)
-        assert reward_type in reward_functions.keys()
-        self._reward_type = reward_type
+        self._reward_fn = reward_fn
         self._discriminator_with_actions = discriminator_with_actions
 
     def _calculate_logits(self, data_dict):
@@ -45,7 +55,7 @@ class DiscriminatorOptimizer(ModelOptimizer):
 
     def predict_reward(self, data_dict):
         logits = self._calculate_logits(data_dict)
-        reward = reward_functions[self._reward_type](logits)
+        reward = self._reward_fn(logits)
         return reward
 
     def _discriminator_loss(self, rollout_data_dict, demo_data_dict):

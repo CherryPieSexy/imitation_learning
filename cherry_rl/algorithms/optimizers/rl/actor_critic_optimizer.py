@@ -40,8 +40,8 @@ class ActorCriticOptimizer(ModelOptimizer):
             self.model.actor_critic.actor.parameters(), self.clip_grad
         ).item()
 
-        if self.model.pi_distribution_str == 'RealNVP':
-            gradient_norms['real_nvp_grad_norm'] = torch.nn.utils.clip_grad_norm_(
+        if hasattr(self.model.pi_distribution, 'parameters'):
+            gradient_norms['policy_distribution_grad_norm'] = torch.nn.utils.clip_grad_norm_(
                 self.model.pi_distribution.parameters(), self.clip_grad
             ).item()
 
