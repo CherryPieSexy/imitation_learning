@@ -38,6 +38,7 @@ class ImpalaCNN(nn.Module):
         for out_channels in blocks_channels:
             self.conv.append(self._init_block(input_channels, out_channels, gain))
             input_channels = out_channels
+        self.conv.append(nn.ReLU())
 
         # cnn: 97x72xC -> 6x5xC' = 30 * C'
         self.conv = nn.Sequential(*self.conv)
