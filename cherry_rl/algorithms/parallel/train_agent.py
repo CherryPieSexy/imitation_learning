@@ -1,5 +1,6 @@
 import time
 
+import torch
 import numpy as np
 from tqdm import trange
 
@@ -237,11 +238,11 @@ class TrainAgent:
         return observation, rollout, time_log
 
     def _reward_statistics(self, rollout):
+        environment_indices = [[[i] for i in range(self._env.num_envs)]]  # add time and reward dimensions
         rewards = self._select_reward_to_plot_fn(
             rollout.get('rewards'),
-            [[[i] for i in range(self._env.num_envs)]]  # add time and reward dimensions
-        )[..., None]
-        # rewards in rollout has shape [T, B, D], but selection must be same for each element and differ only by batch
+            torch.tensor(environment_indices)
+        )
         mask = rollout.get('mask').unsqueeze(-1)
         mean = (mask * rewards).sum() / mask.sum()
         mean_2 = (mask * rewards ** 2).sum() / mask.sum()

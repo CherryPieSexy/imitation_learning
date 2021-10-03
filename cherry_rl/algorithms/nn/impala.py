@@ -11,9 +11,15 @@ class _ResidualBlock(nn.Module):
 
         self._block = nn.Sequential(
             nn.ReLU(),
-            init(nn.Conv2d(channels, channels, kernel_size=3, padding=1), gain=gain),
+            init(
+                nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+                weight_init=nn.init.xavier_uniform_, gain=gain
+            ),
             nn.ReLU(),
-            init(nn.Conv2d(channels, channels, kernel_size=3, padding=1), gain=gain)
+            init(
+                nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+                weight_init=nn.init.xavier_uniform_, gain=gain
+            )
         )
 
     def forward(self, block_input):
@@ -39,7 +45,10 @@ class ImpalaCNN(nn.Module):
     @staticmethod
     def _init_block(in_channels, out_channels, gain):
         block = nn.Sequential(
-            init(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1), gain=gain),
+            init(
+                nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+                weight_init=nn.init.xavier_uniform_, gain=gain
+            ),
             nn.MaxPool2d(3, stride=2, padding=1),
             _ResidualBlock(out_channels),
             _ResidualBlock(out_channels)
