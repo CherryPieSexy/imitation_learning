@@ -10,16 +10,17 @@ class GRUEncoder(nn.Module):
     If someone want LSTM instead of GRU, encoder must return
     concatenated hidden state and split it before calling forward.
     """
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, output_size, initialize_orthogonal=True):
         super().__init__()
         # basically same initialization as in ikostrikov's repo.
         self.gru = nn.GRU(input_size, output_size)
         self.recurrent = True
-        for name, param in self.gru.named_parameters():
-            if 'bias' in name:
-                nn.init.constant_(param, 0)
-            elif 'weight' in name:
-                nn.init.orthogonal_(param, 1)
+        if initialize_orthogonal:
+            for name, param in self.gru.named_parameters():
+                if 'bias' in name:
+                    nn.init.constant_(param, 0)
+                elif 'weight' in name:
+                    nn.init.orthogonal_(param, 1)
 
     def forward(self, observation, hidden_state):
         without_time = False
