@@ -19,7 +19,7 @@ def default_select_reward_to_plot(reward, idx):
     :param idx:    index of environment from reward was obtained.
     :return:       scalar reward
     """
-    return reward[..., 0]
+    return reward
 
 
 class TrainAgent:
