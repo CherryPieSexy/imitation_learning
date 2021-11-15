@@ -12,7 +12,11 @@ class TransitionsDemoBuffer:
         self._actions = actions
         self._rewards = rewards
         self._good_transitions = good_transitions
-        self._num_transitions = self._observations.shape[0]
+        # I drop the last transition from each episode during reading data,
+        # but I use last next transitions during sampling ->
+        # it does not exists for the last observation,
+        # so I have to reduce number of transitions by 1
+        self._num_transitions = self._observations.shape[0] - 1
 
         self._batch_size = batch_size
         self._indices = np.arange(self._num_transitions)
@@ -34,6 +38,7 @@ class TransitionsDemoBuffer:
             read_observations.append(observations[:-1])
             read_actions.append(actions)
             read_rewards.append(rewards)
+            # last transition is bad, because it has no 'next_observation'
             good_transitions.append([1] * (len(actions) - 1) + [0])
 
         return \
@@ -44,14 +49,17 @@ class TransitionsDemoBuffer:
 
     def sample(self):
         # mimics '__iter__' method: every sample will be sampled once per epoch
-        if self._pointer + self._batch_size > self._num_transitions:
+        if self._pointer + self._batch_size + 1 > self._num_transitions:
             np.random.shuffle(self._indices)
             self._pointer = 0
 
-        return {
-            'observations': self._observations[self._pointer:self._pointer + self._batch_size],
-            'next_observations': self._observations[self._pointer + 1:self._pointer + self._batch_size + 1],
-            'actions': self._actions[self._pointer:self._pointer + self._batch_size],
-            'rewards': self._rewards[self._pointer:self._pointer + self._batch_size],
-            'mask': self._good_transitions[self._pointer:self._pointer + self._batch_size]
+        selected_indices = self._indices[self._pointer:self._pointer + self._batch_size]
+        result = {
+            'observations': self._observations[selected_indices],
+            'next_observations': self._observations[selected_indices + 1],
+            'actions': self._actions[selected_indices],
+            'rewards': self._rewards[selected_indices],
+            'mask': self._good_transitions[selected_indices]
         }
+        self._pointer += self._batch_size
+        return result

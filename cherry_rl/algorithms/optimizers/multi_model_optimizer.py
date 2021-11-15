@@ -29,16 +29,17 @@ class MultiModelOptimizer:
     def _obs_embedding(
             self,
             data_dict: Dict[str, Optional[torch.Tensor]],
+            memory: Optional = None,
             with_grad: bool = True,
             obs_key: str = 'observations'
     ) -> torch.Tensor:
         obs = data_dict[obs_key]
         if with_grad:
-            emb, _ = self._actor_critic_optimizer.model.preprocess_observation(obs, None)
+            emb, memory = self._actor_critic_optimizer.model.preprocess_observation(obs, memory)
         else:
             with torch.no_grad():
-                emb, _ = self._actor_critic_optimizer.model.preprocess_observation(obs, None)
-        return emb
+                emb, memory = self._actor_critic_optimizer.model.preprocess_observation(obs, memory)
+        return emb, memory
 
     def _train_encoder(self) -> float:
         # encoder should already have gradients

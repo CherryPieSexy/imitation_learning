@@ -52,7 +52,10 @@ class GAIL(MultiModelOptimizer):
         return rollout_data_dict, gail_rewards.mean().item()
 
     def _obs_embedding(self, data_dict, **kwargs):
-        return super()._obs_embedding(data_dict, self._use_discriminator_grad)
+        emb, _ = super()._obs_embedding(
+            data_dict, with_grad=self._use_discriminator_grad
+        )
+        return emb
 
     def train(self, rollout_data_dict):
         demo_data_dict = self._demo_buffer.sample()
